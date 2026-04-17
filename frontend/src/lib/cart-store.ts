@@ -138,21 +138,26 @@ export function bootstrapCart(): void {
 
   // Refetch the cart on every Astro view-transition AND on full page loads
   // (covers form-submit redirects, session changes, etc.). Initial fetch is
-  // fired immediately below.
+  // fired immediately below. Goes through `/api/cart/current` so the server
+  // can pick `customerCart` vs `cart(cart_id)` based on the HttpOnly auth
+  // cookie — the browser can't see that cookie, so it must not try to pick
+  // the GraphQL field itself (doing so produces a 403 when the cart cookie
+  // and the session customer don't agree).
   const listen = (): void => {
-    const id = readCookie(CART_COOKIE_NAME);
-    if (!id) {
-      cart.set(null);
-      cartId.set(null);
-      return;
-    }
-    if (cartId.get() !== id) cartId.set(id);
     void (async () => {
       try {
-        const c = await getCart(id);
+        const res = await fetch("/api/cart/current", {
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+        });
+        if (!res.ok) return;
+        const body = (await res.json()) as { cart: CartT | null };
+        const c = body.cart;
         cart.set(c);
+        const syncedId = readCookie(CART_COOKIE_NAME);
+        if (cartId.get() !== syncedId) cartId.set(syncedId ?? null);
       } catch {
-        // network error; keep previous state, UI handles skeleton/empty.
+        // network error; keep previous state.
       }
     })();
   };
@@ -165,13 +170,18 @@ export function bootstrapCart(): void {
 /** Force a fresh cart refetch. Call after any server-side mutation that
  *  changed the cart but didn't go through our store (e.g. reorder). */
 export function refetchCart(): void {
-  const id = readCookie(CART_COOKIE_NAME);
-  if (!id) return;
-  if (cartId.get() !== id) cartId.set(id);
   void (async () => {
     try {
-      const c = await getCart(id);
+      const res = await fetch("/api/cart/current", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) return;
+      const body = (await res.json()) as { cart: CartT | null };
+      const c = body.cart;
       cart.set(c);
+      const syncedId = readCookie(CART_COOKIE_NAME);
+      if (cartId.get() !== syncedId) cartId.set(syncedId ?? null);
       publish({ type: "cart-updated", cart: c });
     } catch { /* swallow */ }
   })();

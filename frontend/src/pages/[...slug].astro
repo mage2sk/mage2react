@@ -23,6 +23,10 @@ import Layout from "~/layouts/Base.astro";
 import ProductCard from "~/components/ProductCard.astro";
 import Breadcrumbs from "~/components/seo/Breadcrumbs.astro";
 import CategoryGrid from "~/components/catalog/CategoryGrid.astro";
+import LayeredNav from "~/components/catalog/LayeredNav.astro";
+import LayeredNavMobile from "~/components/catalog/LayeredNavMobile.tsx";
+import ActiveFilters from "~/components/catalog/ActiveFilters.astro";
+import Toolbar from "~/components/catalog/Toolbar.astro";
 import { renderCategoryPayload, buildCategoryJsonLd } from "~/lib/catalog-helpers";
 import AddToCartButton from "~/components/AddToCartButton.tsx";
 import Gallery from "~/components/product/Gallery.astro";
@@ -247,6 +251,7 @@ let category: Awaited<ReturnType<typeof getCategoryByUid>> = null;
 let categoryProducts: Awaited<ReturnType<typeof getProductsByCategoryUid>>["products"] | null = null;
 let categoryPage = 1;
 
+let categoryFacetedPayload: Awaited<ReturnType<typeof renderCategoryPayload>> = null;
 if (finalResolved.type === "CATEGORY" && finalResolved.uid) {
   const pageParam = Astro.url.searchParams.get("page");
   categoryPage = Math.max(1, Number.parseInt(pageParam ?? "1", 10) || 1);
@@ -255,14 +260,18 @@ if (finalResolved.type === "CATEGORY" && finalResolved.uid) {
   const descendantUids = (cat?.children ?? [])
     .map((c) => c.uid)
     .filter((u): u is string => Boolean(u));
-  const prods = await getProductsByCategoryUid(
-    finalResolved.uid,
-    categoryPage,
-    24,
-    undefined,
-    descendantUids,
-  );
+  const [prods, payload] = await Promise.all([
+    getProductsByCategoryUid(
+      finalResolved.uid,
+      categoryPage,
+      24,
+      undefined,
+      descendantUids,
+    ),
+    renderCategoryPayload(slugNoSuffix, Astro.url.searchParams),
+  ]);
   categoryProducts = prods.products;
+  categoryFacetedPayload = payload;
 }
 
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -759,19 +768,23 @@ if (finalResolved.type === "CMS_PAGE" && !cmsPage) {
     prev={categoryView.absPrev}
     next={categoryView.absNext}
   >
-    <Breadcrumbs items={categoryView.crumbs} />
+    {!categoryFacetedPayload && (
+      <>
+        <Breadcrumbs items={categoryView.crumbs} />
 
-    <header class="mb-8 border-b border-zinc-200 pb-6">
-      <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">{categoryView.title}</h1>
-      {categoryView.descriptionHtml && (
-        <div class="prose prose-sm mt-4 max-w-none text-zinc-600" set:html={categoryView.descriptionHtml} />
-      )}
-      {category.display_mode !== "PAGE" && (
-        <p class="mt-3 text-sm text-zinc-500">
-          {categoryProducts.total_count} {categoryProducts.total_count === 1 ? "product" : "products"}
-        </p>
-      )}
-    </header>
+        <header class="mb-8 border-b border-zinc-200 pb-6">
+          <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">{categoryView.title}</h1>
+          {categoryView.descriptionHtml && (
+            <div class="prose prose-sm mt-4 max-w-none text-zinc-600" set:html={categoryView.descriptionHtml} />
+          )}
+          {category.display_mode !== "PAGE" && (
+            <p class="mt-3 text-sm text-zinc-500">
+              {categoryProducts.total_count} {categoryProducts.total_count === 1 ? "product" : "products"}
+            </p>
+          )}
+        </header>
+      </>
+    )}
 
     {category.cms_block?.content && (
       <section
@@ -814,7 +827,9 @@ if (finalResolved.type === "CMS_PAGE" && !cmsPage) {
     )}
 
     {/* Show products unless display_mode=PAGE AND a cms_block is configured. */}
-    {category.display_mode === "PAGE" && category.cms_block?.content ? null : categoryProducts.items.length === 0 ? (
+    {category.display_mode === "PAGE" && category.cms_block?.content ? null : categoryFacetedPayload ? (
+      <CategoryGrid {...categoryFacetedPayload} />
+    ) : categoryProducts.items.length === 0 ? (
       <div class="rounded-xl border border-dashed border-zinc-300 p-12 text-center text-zinc-500">
         {category.children && category.children.length > 0
           ? "Browse the subcategories above."

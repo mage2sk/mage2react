@@ -119,14 +119,14 @@ export default function BannerCarousel({
               <div className="aspect-[12/5] w-full bg-zinc-200" aria-hidden="true" />
             )}
             {(s.title || s.subtitle || (s.cta_label && s.cta_url)) && (
-              <div className="absolute inset-0 flex flex-col items-start justify-end gap-3 bg-gradient-to-t from-black/70 via-black/30 to-transparent p-6 text-white sm:p-10">
+              <div className="absolute inset-0 flex flex-col items-start justify-end gap-3 bg-gradient-to-t from-black/70 via-black/30 to-transparent p-6 sm:p-10">
                 {s.title && (
-                  <h3 className="max-w-xl text-2xl font-bold tracking-tight drop-shadow sm:text-4xl">
+                  <h3 className="max-w-xl text-2xl font-bold tracking-tight text-white drop-shadow-lg sm:text-4xl">
                     {s.title}
                   </h3>
                 )}
                 {s.subtitle && (
-                  <p className="max-w-xl text-sm drop-shadow sm:text-base">{s.subtitle}</p>
+                  <p className="max-w-xl text-sm text-white drop-shadow-md sm:text-base">{s.subtitle}</p>
                 )}
                 {s.cta_label && s.cta_url && (
                   <a

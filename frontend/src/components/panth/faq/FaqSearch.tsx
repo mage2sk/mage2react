@@ -58,10 +58,27 @@ export default function FaqSearch({ items, openFirst = false }: Props): JSX.Elem
   const filtered = useMemo(() => {
     if (!debouncedQ) return items;
     const needle = normalize(debouncedQ);
-    return items.filter((it) => {
-      const hay = normalize(`${it.question} ${it.answer.replace(/<[^>]+>/g, " ")}`);
-      return hay.includes(needle);
-    });
+    // Prefer question matches; fall back to answer-body matches only if no
+    // question matched. Inside each group, matches where the question starts
+    // with the query rank first (tighter relevance).
+    const scored = items
+      .map((it) => {
+        const qHay = normalize(it.question);
+        const aHay = normalize(it.answer.replace(/<[^>]+>/g, " "));
+        if (qHay.includes(needle)) {
+          return { it, score: qHay.startsWith(needle) ? 3 : 2 };
+        }
+        if (aHay.includes(needle)) {
+          return { it, score: 1 };
+        }
+        return { it, score: 0 };
+      })
+      .filter((s) => s.score > 0);
+    const topScore = Math.max(...scored.map((s) => s.score), 0);
+    // If we have any question matches, drop the answer-only matches entirely.
+    const keep = topScore >= 2 ? scored.filter((s) => s.score >= 2) : scored;
+    keep.sort((a, b) => b.score - a.score);
+    return keep.map((s) => s.it);
   }, [items, debouncedQ]);
 
   const empty = filtered.length === 0;

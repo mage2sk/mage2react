@@ -70,34 +70,6 @@ const gearBlockHtml = cmsBlocks["home-gear-block"]?.content
     <section class="prose max-w-none" set:html={mainBlockHtml} />
   )}
 
-  <section class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-zinc-900 via-zinc-800 to-zinc-900 px-6 py-16 text-white sm:px-12 sm:py-24">
-    <div class="max-w-3xl">
-      <p class="mb-4 text-sm font-medium uppercase tracking-widest text-zinc-300">
-        Headless commerce
-      </p>
-      <h1 class="text-4xl font-bold leading-tight sm:text-6xl">
-        mage2react — the fastest storefront Magento has ever seen
-      </h1>
-      <p class="mt-6 max-w-xl text-lg text-zinc-300">
-        A React + Astro storefront over Magento GraphQL. Streaming pages, instant cart, zero jank.
-      </p>
-      <div class="mt-8 flex flex-wrap gap-3">
-        <a
-          href="/women.html"
-          class="inline-flex items-center rounded-full bg-white px-6 py-3 text-sm font-medium text-zinc-900 hover:bg-zinc-100"
-        >
-          Shop Women
-        </a>
-        <a
-          href="/gear.html"
-          class="inline-flex items-center rounded-full border border-white/30 px-6 py-3 text-sm font-medium text-white hover:bg-white/10"
-        >
-          Shop Gear
-        </a>
-      </div>
-    </div>
-  </section>
-
   <section class="mt-12 grid grid-cols-1 gap-4 sm:grid-cols-3">
     {tiles.map((tile) => (
       <a
