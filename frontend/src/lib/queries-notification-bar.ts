@@ -1,5 +1,4 @@
-import { z } from "zod";
-import { query } from "./graphql";
+import { panthConfig } from "./panth-db";
 
 /**
  * queries-notification-bar.ts
@@ -12,17 +11,6 @@ import { query } from "./graphql";
  * the component (it's where they get used).
  */
 
-const Bar = z.object({
-  id: z.union([z.string(), z.number()]).nullable().optional(),
-  message: z.string().nullable().optional(),
-  link: z.string().nullable().optional(),
-  bg_color: z.string().nullable().optional(),
-  text_color: z.string().nullable().optional(),
-  dismissible: z.boolean().nullable().optional(),
-  priority: z.number().nullable().optional(),
-  start_at: z.string().nullable().optional(),
-  end_at: z.string().nullable().optional(),
-});
 export type NotificationBarT = {
   id: string;
   message: string;
@@ -35,94 +23,36 @@ export type NotificationBarT = {
   end_at: string | null;
 };
 
-const Envelope = z.object({
-  panthNotificationBars: z
-    .object({
-      items: z.array(Bar).nullable().optional(),
-    })
-    .nullable()
-    .optional(),
-});
-
-let warnedMissing = false;
-function logSchemaMiss(err: unknown): void {
-  if (warnedMissing) return;
-  warnedMissing = true;
-  const msg = err instanceof Error ? err.message : String(err);
-  if (/Cannot query field|Unknown type|not exist/i.test(msg)) {
-    console.warn(
-      "[panth-notification-bar] panthNotificationBars field missing — install/enable Panth_NotificationBar.",
-    );
-  } else {
-    console.warn("[panth-notification-bar] query failed:", msg);
-  }
-}
-
-function coerceBar(
-  raw: z.infer<typeof Bar>,
-  fallbackIdx: number,
-): NotificationBarT | null {
-  const rawId = raw.id;
-  const id = typeof rawId === "number" ? String(rawId) : (rawId ?? "").trim();
-  const msg = (raw.message ?? "").trim();
-  if (!msg) return null;
-  return {
-    id: id.length ? id : `bar-${fallbackIdx}`,
-    message: msg,
-    link: raw.link?.trim() || null,
-    bg_color: raw.bg_color?.trim() || null,
-    text_color: raw.text_color?.trim() || null,
-    dismissible: raw.dismissible === true,
-    priority: typeof raw.priority === "number" ? raw.priority : 0,
-    start_at: raw.start_at?.trim() || null,
-    end_at: raw.end_at?.trim() || null,
-  };
-}
-
 /**
- * Returns all configured notification bars — including expired/future ones.
- * Filtering by current time is the consumer's job (so SSR vs. client can make
- * their own decision). Sorted by priority descending.
+ * Returns the active notification bars. Panth_NotificationBar has no
+ * dedicated table in this deployment — we derive a single bar from
+ * `core_config_data` (`panth_notification_bar/general/message`). Additional
+ * bars can be added once the module ships a dedicated table.
  *
- * Never throws. Returns `[]` on any error / schema miss.
+ * Never throws. Returns `[]` when disabled or the message is missing.
  */
 export async function getNotificationBars(): Promise<NotificationBarT[]> {
-  const doc = /* GraphQL */ `
-    query PanthNotificationBars {
-      panthNotificationBars {
-        items {
-          id
-          message
-          link
-          bg_color
-          text_color
-          dismissible
-          priority
-          start_at
-          end_at
-        }
-      }
-    }
-  `;
-
-  try {
-    const raw = await query<unknown>(doc, {});
-    const parsed = Envelope.safeParse(raw);
-    if (!parsed.success) return [];
-    const env = parsed.data.panthNotificationBars;
-    if (!env) return [];
-    const out: NotificationBarT[] = [];
-    (env.items ?? []).forEach((b, idx) => {
-      if (!b) return;
-      const coerced = coerceBar(b, idx);
-      if (coerced) out.push(coerced);
-    });
-    out.sort((a, b) => b.priority - a.priority);
-    return out;
-  } catch (err) {
-    logSchemaMiss(err);
-    return [];
-  }
+  const enabled = (await panthConfig("panth_notification_bar/general/enabled")) === "1";
+  if (!enabled) return [];
+  const msg = await panthConfig("panth_notification_bar/general/message");
+  if (!msg) return [];
+  const link = await panthConfig("panth_notification_bar/general/link");
+  const bg = await panthConfig("panth_notification_bar/general/bg_color");
+  const fg = await panthConfig("panth_notification_bar/general/text_color");
+  const dismissible = (await panthConfig("panth_notification_bar/general/dismissible")) !== "0";
+  return [
+    {
+      id: "config",
+      message: msg,
+      link: link && link.length > 0 ? link : null,
+      bg_color: bg && bg.length > 0 ? bg : null,
+      text_color: fg && fg.length > 0 ? fg : null,
+      dismissible,
+      priority: 0,
+      start_at: null,
+      end_at: null,
+    },
+  ];
 }
 
 /**

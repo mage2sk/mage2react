@@ -1,12 +1,17 @@
 import { z } from "zod";
 import { query } from "./graphql";
+import { panthConfig } from "./panth-db";
 
 /**
  * queries-footer.ts
  *
  * Typed helper for `Panth_Footer`. Admin-configured footer columns, social
- * links, copyright HTML, and payment-method metadata. All fields
- * `.nullable().optional()`; `safeParse` + empty fallback.
+ * links, copyright HTML, and payment-method metadata.
+ *
+ * Panth_Footer does not expose GraphQL, so if the field is missing we fall
+ * back to a reasonable default Luma-style footer (About, Shop, Help, Connect
+ * + payment badges) so the storefront always renders a full footer instead
+ * of just a bare copyright row.
  */
 
 const FooterLink = z.object({
@@ -67,9 +72,66 @@ function logSchemaMiss(err: unknown): void {
   }
 }
 
+const DEFAULT_CONFIG: FooterConfig = {
+  columns: [
+    {
+      title: "Shop",
+      links: [
+        { label: "What's New", url: "/what-is-new.html" },
+        { label: "Women", url: "/women.html" },
+        { label: "Men", url: "/men.html" },
+        { label: "Gear", url: "/gear.html" },
+        { label: "Sale", url: "/sale.html" },
+      ],
+    },
+    {
+      title: "Help",
+      links: [
+        { label: "FAQ", url: "/faq" },
+        { label: "Shipping & Returns", url: "/shipping-information" },
+        { label: "Contact Us", url: "/contact" },
+        { label: "Track Order", url: "/customer/account" },
+      ],
+    },
+    {
+      title: "About",
+      links: [
+        { label: "About Us", url: "/about-us" },
+        { label: "Customer Service", url: "/customer-service" },
+        { label: "Privacy Policy", url: "/privacy-policy" },
+        { label: "Terms", url: "/terms-of-service" },
+      ],
+    },
+    {
+      title: "Account",
+      links: [
+        { label: "My Account", url: "/customer/account" },
+        { label: "Wishlist", url: "/wishlist" },
+        { label: "Orders & Returns", url: "/customer/account" },
+        { label: "Compare Products", url: "/compare" },
+      ],
+    },
+  ],
+  social_links: [
+    { platform: "facebook", url: "https://facebook.com/", label: "Facebook" },
+    { platform: "instagram", url: "https://instagram.com/", label: "Instagram" },
+    { platform: "x", url: "https://x.com/", label: "X (Twitter)" },
+    { platform: "youtube", url: "https://youtube.com/", label: "YouTube" },
+  ],
+  copyright_html: "",
+  payment_methods: [
+    { label: "Visa", code: "visa" },
+    { label: "Mastercard", code: "mc" },
+    { label: "Amex", code: "amex" },
+    { label: "PayPal", code: "paypal" },
+    { label: "Apple Pay", code: "applepay" },
+  ],
+};
+
 /**
- * Returns the admin-managed footer configuration. Never throws. Empty
- * fallback on any error or schema mismatch.
+ * Returns the admin-managed footer configuration. Never throws. Falls back to
+ * `DEFAULT_CONFIG` when Panth_Footer is not installed or returns no rows —
+ * that way the storefront always has a full footer instead of a bare row.
  */
 export async function getFooterConfig(): Promise<FooterConfig> {
   const empty: FooterConfig = {
@@ -106,10 +168,10 @@ export async function getFooterConfig(): Promise<FooterConfig> {
   try {
     const raw = await query<unknown>(doc, {});
     const parsed = Envelope.safeParse(raw);
-    if (!parsed.success) return empty;
+    if (!parsed.success) return resolveFallback();
     const env = parsed.data.panthFooterConfig;
-    if (!env) return empty;
-    return {
+    if (!env) return resolveFallback();
+    const cfg: FooterConfig = {
       columns: (env.columns ?? []).filter(
         (c): c is FooterColumnT => c !== null && c !== undefined,
       ),
@@ -121,8 +183,29 @@ export async function getFooterConfig(): Promise<FooterConfig> {
         (p): p is PaymentMethodT => p !== null && p !== undefined,
       ),
     };
+    if (cfg.columns.length === 0 && cfg.social_links.length === 0 && cfg.payment_methods.length === 0) {
+      return resolveFallback(cfg.copyright_html);
+    }
+    return cfg;
   } catch (err) {
     logSchemaMiss(err);
-    return empty;
+    return resolveFallback();
   }
+}
+
+async function resolveFallback(copyrightOverride?: string): Promise<FooterConfig> {
+  // Allow admins to toggle a minimal vs default footer via config.
+  const minimal = (await panthConfig("panth_footer/general/minimal")) === "1";
+  if (minimal) {
+    return {
+      columns: [],
+      social_links: [],
+      copyright_html: copyrightOverride ?? "",
+      payment_methods: [],
+    };
+  }
+  return {
+    ...DEFAULT_CONFIG,
+    copyright_html: copyrightOverride ?? DEFAULT_CONFIG.copyright_html,
+  };
 }

@@ -1,96 +1,100 @@
-import { z } from "zod";
-import { query } from "./graphql";
+import { panthQuery } from "./panth-db";
 
 /**
  * queries-banner-slider.ts
  *
- * Typed helper for `Panth_BannerSlider`. The parent module is expected to
- * expose a `panthBannerSlider(identifier: String)` query returning
- * `{ items: [...] }`. All fields are `.nullable().optional()` — we cannot
- * verify the schema, so `safeParse` + empty fallback is the rule.
+ * Reads `Panth_BannerSlider` content straight from the seeded `panth_banner_*`
+ * tables. The Panth_BannerSlider module doesn't ship a GraphQL resolver, so
+ * direct DB access is the simplest path to render admin-managed slides on
+ * the Astro storefront.
  *
- * Never throws. Returns an empty `{items:[]}` on any failure — callers can
- * rely on `items.length` to decide whether to render anything.
+ * Never throws. Returns `{items:[]}` on any failure — callers just render
+ * nothing in that case.
  */
 
-const BannerSlide = z.object({
-  title: z.string().nullable().optional(),
-  subtitle: z.string().nullable().optional(),
-  image: z.string().nullable().optional(),
-  cta_label: z.string().nullable().optional(),
-  cta_url: z.string().nullable().optional(),
-  alt: z.string().nullable().optional(),
-  priority: z.number().nullable().optional(),
-});
-export type BannerSlideT = z.infer<typeof BannerSlide>;
-
-const Envelope = z.object({
-  panthBannerSlider: z
-    .object({
-      items: z.array(BannerSlide).nullable().optional(),
-    })
-    .nullable()
-    .optional(),
-});
+export interface BannerSlideT {
+  title?: string | null;
+  subtitle?: string | null;
+  image?: string | null;
+  cta_label?: string | null;
+  cta_url?: string | null;
+  alt?: string | null;
+  priority?: number | null;
+}
 
 export type BannerSliderResult = {
   items: BannerSlideT[];
 };
 
-let warnedMissing = false;
-function logSchemaMiss(err: unknown): void {
-  if (warnedMissing) return;
-  warnedMissing = true;
-  const msg = err instanceof Error ? err.message : String(err);
-  if (/Cannot query field|Unknown type|not exist/i.test(msg)) {
-    console.warn(
-      "[panth-banner-slider] panthBannerSlider field missing — install/enable Panth_BannerSlider.",
-    );
-  } else {
-    console.warn("[panth-banner-slider] query failed:", msg);
-  }
+interface SlideRow {
+  title: string | null;
+  content_html: string | null;
+  desktop_image: string | null;
+  mobile_image: string | null;
+  link_url: string | null;
+  alt_text: string | null;
+  sort_order: number | null;
 }
 
-/**
- * Returns an active banner slider by identifier. Never throws. On any error
- * or schema mismatch, returns `{ items: [] }`.
- */
+const MEDIA_BASE = (process.env.PUBLIC_MEDIA_URL ?? "").replace(/\/+$/, "");
+
+function absUrl(raw: string | null): string | null {
+  if (!raw) return null;
+  const s = raw.trim();
+  if (!s.length) return null;
+  if (/^https?:\/\//i.test(s) || s.startsWith("/")) return s;
+  if (MEDIA_BASE) return `${MEDIA_BASE}/${s.replace(/^\/+/, "")}`;
+  return s;
+}
+
+function extractSubtitle(html: string | null): string | null {
+  if (!html) return null;
+  const m = html.match(/<p[^>]*>([\s\S]*?)<\/p>/i);
+  if (m && m[1]) return m[1].replace(/<[^>]*>/g, "").trim();
+  const stripped = html.replace(/<[^>]*>/g, "").trim();
+  return stripped.length > 0 ? stripped : null;
+}
+
+function extractTitleFromContent(html: string | null): string | null {
+  if (!html) return null;
+  const m = html.match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/i);
+  if (m && m[1]) return m[1].replace(/<[^>]*>/g, "").trim();
+  return null;
+}
+
 export async function getBannerSlider(
-  identifier: string = "home",
+  identifier: string = "home-hero",
 ): Promise<BannerSliderResult> {
-  const empty: BannerSliderResult = { items: [] };
+  const sliderRows = await panthQuery<{ slider_id: number }>(
+    "SELECT slider_id FROM panth_banner_slider WHERE identifier = ? AND is_active = 1 ORDER BY slider_id ASC LIMIT 1",
+    [identifier],
+  );
+  const first = sliderRows[0];
+  if (!first) return { items: [] };
+  const sliderId = first.slider_id;
 
-  const doc = /* GraphQL */ `
-    query PanthBannerSlider($identifier: String!) {
-      panthBannerSlider(identifier: $identifier) {
-        items {
-          title
-          subtitle
-          image
-          cta_label
-          cta_url
-          alt
-          priority
-        }
-      }
-    }
-  `;
+  const slides = await panthQuery<SlideRow>(
+    `SELECT title, content_html, desktop_image, mobile_image, link_url, alt_text, sort_order
+       FROM panth_banner_slide
+      WHERE slider_id = ? AND is_active = 1
+        AND (date_from IS NULL OR date_from <= CURDATE())
+        AND (date_to IS NULL OR date_to >= CURDATE())
+      ORDER BY sort_order ASC, slide_id ASC`,
+    [sliderId],
+  );
 
-  try {
-    const raw = await query<unknown>(doc, { identifier });
-    const parsed = Envelope.safeParse(raw);
-    if (!parsed.success) return empty;
-    const env = parsed.data.panthBannerSlider;
-    if (!env) return empty;
-    const items = (env.items ?? []).filter(
-      (s): s is BannerSlideT => s !== null && s !== undefined,
-    );
-    // Sort by priority descending (higher = earlier). Slides without a
-    // priority default to 0 and retain array order.
-    items.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
-    return { items };
-  } catch (err) {
-    logSchemaMiss(err);
-    return empty;
-  }
+  const items: BannerSlideT[] = slides.map((r, idx) => {
+    const headingFromHtml = extractTitleFromContent(r.content_html);
+    return {
+      title: (r.title ?? headingFromHtml ?? "").trim() || null,
+      subtitle: extractSubtitle(r.content_html),
+      image: absUrl(r.desktop_image ?? r.mobile_image),
+      cta_label: r.link_url ? "Shop now" : null,
+      cta_url: r.link_url,
+      alt: r.alt_text ?? r.title ?? null,
+      priority: slides.length - idx,
+    };
+  });
+
+  return { items };
 }

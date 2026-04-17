@@ -4,30 +4,28 @@
  *
  * Drop `<PanthSlot identifier="banner-slider:home-hero" />` into any Astro
  * page, CMS template, or category block and it renders the matching Panth
- * widget. Supported identifiers (grep the backing modules for details):
+ * widget. Supported identifiers:
  *
  *   banner-slider:<slider_identifier>       Panth_BannerSlider
- *   testimonials[:<limit>]                  Panth_Testimonials (slider)
+ *   testimonials[:<limit>]                  Panth_Testimonials
  *   testimonials-grid[:<limit>]             Panth_Testimonials (grid)
- *   faq[:<category_url_key>]                Panth_Faq
- *   form:<url_key>                          Panth_DynamicForms
+ *   faq[:<category_id>]                     Panth_Faq
  *   cms-block:<identifier>                  Core Magento CMS block
  *   product-slider:<slug>                   Panth_ProductSlider
  *   notification-bar                        Panth_NotificationBar
- *   whatsapp                                Panth_Whatsapp
- *   live-activity:<sku>                     Panth_LiveActivity
- *   attachments:<sku>                       Panth_ProductAttachments
+ *   whatsapp                                Panth_Whatsapp (floating btn)
  *
- * Unknown identifiers render nothing (silent no-op). All error paths
- * degrade gracefully — if the backing Panth module is missing, removed,
- * or disabled the slot renders empty rather than crashing.
+ * Unknown identifiers render nothing (silent no-op). Errors from any
+ * backing module degrade gracefully to an empty render.
  */
 import BannerSliderStatic from "./banner-slider/BannerSliderStatic.astro";
 import TestimonialsSlider from "./testimonials/TestimonialsSlider.astro";
 import FaqAccordion from "./faq/FaqAccordion.astro";
 import NotificationBarSSR from "./notification-bar/NotificationBarSSR.astro";
+import WhatsappButtonSSR from "./whatsapp/WhatsappButtonSSR.astro";
 import CmsBlockSlot from "~/components/cms/CmsBlockSlot.astro";
 import ProductSlider from "./product-slider/ProductSlider.astro";
+import { getFaqItems } from "~/lib/queries-faq";
 
 type Props = { identifier: string; className?: string };
 const { identifier, className } = Astro.props;
@@ -41,21 +39,25 @@ function parse(id: string): { kind: string; arg: string | null; limit: number | 
 }
 
 const { kind, arg, limit } = parse(identifier);
+
+const faqItems = kind === "faq" ? (await getFaqItems(arg, 1, 50)).items : [];
 ---
 {className ? <div class={className}>
   {kind === "banner-slider" && arg && <BannerSliderStatic identifier={arg} />}
-  {kind === "testimonials" && <TestimonialsSlider limit={limit ?? 6} />}
-  {kind === "testimonials-grid" && <TestimonialsSlider limit={limit ?? 12} layout="grid" />}
-  {kind === "faq" && <FaqAccordion categoryUrlKey={arg} />}
+  {kind === "testimonials" && <TestimonialsSlider pageSize={limit ?? 6} />}
+  {kind === "testimonials-grid" && <TestimonialsSlider pageSize={limit ?? 12} />}
+  {kind === "faq" && <FaqAccordion items={faqItems.map((i) => ({ question: i.question, answer: i.answer }))} openFirst />}
   {kind === "cms-block" && arg && <CmsBlockSlot identifier={arg} />}
   {kind === "product-slider" && arg && <ProductSlider slug={arg} />}
   {kind === "notification-bar" && <NotificationBarSSR />}
+  {kind === "whatsapp" && <WhatsappButtonSSR />}
 </div> : <Fragment>
   {kind === "banner-slider" && arg && <BannerSliderStatic identifier={arg} />}
-  {kind === "testimonials" && <TestimonialsSlider limit={limit ?? 6} />}
-  {kind === "testimonials-grid" && <TestimonialsSlider limit={limit ?? 12} layout="grid" />}
-  {kind === "faq" && <FaqAccordion categoryUrlKey={arg} />}
+  {kind === "testimonials" && <TestimonialsSlider pageSize={limit ?? 6} />}
+  {kind === "testimonials-grid" && <TestimonialsSlider pageSize={limit ?? 12} />}
+  {kind === "faq" && <FaqAccordion items={faqItems.map((i) => ({ question: i.question, answer: i.answer }))} openFirst />}
   {kind === "cms-block" && arg && <CmsBlockSlot identifier={arg} />}
   {kind === "product-slider" && arg && <ProductSlider slug={arg} />}
   {kind === "notification-bar" && <NotificationBarSSR />}
+  {kind === "whatsapp" && <WhatsappButtonSSR />}
 </Fragment>}

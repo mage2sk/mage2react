@@ -1,6 +1,7 @@
 ---
 import Layout from "~/layouts/Base.astro";
 import ProductCard from "~/components/ProductCard.astro";
+import PanthSlot from "~/components/panth/PanthSlot.astro";
 import { getFeaturedProducts, getCmsBlocks } from "~/lib/queries";
 import { sanitizeHtml } from "~/lib/sanitize";
 import {
@@ -63,6 +64,8 @@ const gearBlockHtml = cmsBlocks["home-gear-block"]?.content
   jsonLd={jsonLd}
   heroImage={heroImage}
 >
+  <PanthSlot identifier="banner-slider:home-hero" />
+
   {mainBlockHtml && (
     <section class="prose max-w-none" set:html={mainBlockHtml} />
   )}
@@ -133,4 +136,6 @@ const gearBlockHtml = cmsBlocks["home-gear-block"]?.content
       </div>
     )}
   </section>
+
+  <PanthSlot identifier="testimonials:6" className="mt-16" />
 </Layout>

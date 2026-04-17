@@ -1,5 +1,4 @@
-import { z } from "zod";
-import { query } from "./graphql";
+import { panthConfig } from "./panth-db";
 
 /**
  * queries-whatsapp.ts
@@ -24,19 +23,6 @@ export type WhatsappPosition = (typeof WHATSAPP_POSITIONS)[number];
 function isWhatsappPosition(v: unknown): v is WhatsappPosition {
   return typeof v === "string" && (WHATSAPP_POSITIONS as readonly string[]).includes(v);
 }
-
-const Envelope = z.object({
-  panthWhatsappConfig: z
-    .object({
-      enabled: z.boolean().nullable().optional(),
-      phone: z.string().nullable().optional(),
-      message_template: z.string().nullable().optional(),
-      position: z.string().nullable().optional(),
-      button_color: z.string().nullable().optional(),
-    })
-    .nullable()
-    .optional(),
-});
 
 export interface WhatsappConfig {
   enabled: boolean;
@@ -84,61 +70,28 @@ export function validateWhatsappColor(raw: string | null | undefined): string | 
   return null;
 }
 
-let warnedMissing = false;
-function logSchemaMiss(err: unknown): void {
-  if (warnedMissing) return;
-  warnedMissing = true;
-  const msg = err instanceof Error ? err.message : String(err);
-  if (/Cannot query field|Unknown type|not exist/i.test(msg)) {
-    console.warn(
-      "[panth-whatsapp] panthWhatsappConfig missing — install/enable Panth_Whatsapp.",
-    );
-  } else {
-    console.warn("[panth-whatsapp] query failed:", msg);
-  }
-}
-
 /**
- * Returns the admin-configured WhatsApp button settings. Never throws. On
- * any error or schema mismatch, returns `DISABLED_WHATSAPP`.
+ * Returns the admin-configured WhatsApp button settings, read directly from
+ * `core_config_data`. Never throws. Returns `DISABLED_WHATSAPP` when the
+ * module is disabled, the phone is missing/invalid, or the DB is unreachable.
  */
 export async function getWhatsappConfig(): Promise<WhatsappConfig> {
-  const doc = /* GraphQL */ `
-    query PanthWhatsappConfig {
-      panthWhatsappConfig {
-        enabled
-        phone
-        message_template
-        position
-        button_color
-      }
-    }
-  `;
+  const enabled = (await panthConfig("panth_whatsapp/general/enabled")) === "1";
+  if (!enabled) return DISABLED_WHATSAPP;
 
-  try {
-    const raw = await query<unknown>(doc, {});
-    const parsed = Envelope.safeParse(raw);
-    if (!parsed.success) return DISABLED_WHATSAPP;
-    const env = parsed.data.panthWhatsappConfig;
-    if (!env) return DISABLED_WHATSAPP;
-    if (env.enabled !== true) return { ...DISABLED_WHATSAPP, enabled: false };
+  const phoneRaw = await panthConfig("panth_whatsapp/general/phone");
+  const phone = validateWhatsappPhone(phoneRaw);
+  if (!phone) return DISABLED_WHATSAPP;
 
-    const phone = validateWhatsappPhone(env.phone ?? null);
-    if (!phone) return DISABLED_WHATSAPP;
+  const tpl = (await panthConfig("panth_whatsapp/general/message_template")) ?? null;
+  const positionRaw = await panthConfig("panth_whatsapp/general/position");
+  const colorRaw = await panthConfig("panth_whatsapp/general/button_color");
 
-    const position = isWhatsappPosition(env.position) ? env.position : "bottom-right";
-    const color = validateWhatsappColor(env.button_color ?? null);
-    const tpl = env.message_template?.trim() || null;
-
-    return {
-      enabled: true,
-      phone,
-      message_template: tpl,
-      position,
-      button_color: color,
-    };
-  } catch (err) {
-    logSchemaMiss(err);
-    return DISABLED_WHATSAPP;
-  }
+  return {
+    enabled: true,
+    phone,
+    message_template: tpl && tpl.length > 0 ? tpl : null,
+    position: isWhatsappPosition(positionRaw) ? positionRaw : "bottom-right",
+    button_color: validateWhatsappColor(colorRaw),
+  };
 }

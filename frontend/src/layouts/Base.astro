@@ -5,7 +5,9 @@ import Toaster from "~/components/Toaster.tsx";
 import SearchBox from "~/components/SearchBox.tsx";
 import CompareBadge from "~/components/compare/CompareBadge.tsx";
 import WishlistBadge from "~/components/product/WishlistBadge.tsx";
-import Footer from "~/components/Footer.astro";
+import PanthFooter from "~/components/panth/footer/PanthFooter.astro";
+import NotificationBarSSR from "~/components/panth/notification-bar/NotificationBarSSR.astro";
+import WhatsappButtonSSR from "~/components/panth/whatsapp/WhatsappButtonSSR.astro";
 import Seo from "~/components/seo/Seo.astro";
 import ClientRouter from "~/components/ClientRouter.astro";
 import { sanitizeHtml } from "~/lib/sanitize";
@@ -166,6 +168,7 @@ const copyrightHtml = storeConfig.copyright
     {headIncludes && <Fragment set:html={headIncludes} />}
   </head>
   <body class="min-h-screen bg-white">
+    <NotificationBarSSR />
     <header class="sticky top-0 z-40 border-b bg-white/90 backdrop-blur">
       <div class="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
         {/* Mobile hamburger — zero-JS <details> drawer */}
@@ -391,7 +394,8 @@ const copyrightHtml = storeConfig.copyright
       <slot />
     </main>
 
-    <Footer copyrightHtml={copyrightHtml} />
+    <PanthFooter copyrightHtml={copyrightHtml} />
     <Toaster client:idle />
+    <WhatsappButtonSSR />
   </body>
 </html>

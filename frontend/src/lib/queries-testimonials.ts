@@ -1,40 +1,25 @@
-import { z } from "zod";
-import { query } from "./graphql";
+import { panthQuery } from "./panth-db";
 
 /**
  * queries-testimonials.ts
  *
- * Typed helper for `Panth_Testimonials`. The parent module is expected to
- * expose a `panthTestimonials(pageSize, currentPage)` query returning
- * `{ items: [...], page_info }`. All fields are `.nullable().optional()` —
- * we cannot verify the schema, so `safeParse` + empty fallback is the rule.
+ * Reads `Panth_Testimonials` content directly from the seeded `panth_testimonial`
+ * table. Panth_Testimonials has no GraphQL resolver so we query MySQL
+ * over the Docker network.
+ *
+ * Never throws. Returns an empty page on any failure.
  */
 
-const TestimonialItem = z.object({
-  customer_name: z.string().nullable().optional(),
-  photo: z.string().nullable().optional(),
-  rating: z.number().nullable().optional(),
-  title: z.string().nullable().optional(),
-  body: z.string().nullable().optional(),
-  created_at: z.string().nullable().optional(),
-});
-export type TestimonialT = z.infer<typeof TestimonialItem>;
-
-const PageInfo = z.object({
-  total_pages: z.number().nullable().optional(),
-  current_page: z.number().nullable().optional(),
-  page_size: z.number().nullable().optional(),
-});
-
-const Envelope = z.object({
-  panthTestimonials: z
-    .object({
-      items: z.array(TestimonialItem).nullable().optional(),
-      page_info: PageInfo.nullable().optional(),
-    })
-    .nullable()
-    .optional(),
-});
+export interface TestimonialT {
+  customer_name?: string | null;
+  photo?: string | null;
+  rating?: number | null;
+  title?: string | null;
+  body?: string | null;
+  created_at?: string | null;
+  customer_title?: string | null;
+  customer_company?: string | null;
+}
 
 export type TestimonialsPage = {
   items: TestimonialT[];
@@ -43,73 +28,51 @@ export type TestimonialsPage = {
   totalPages: number;
 };
 
-let warnedMissing = false;
-function logSchemaMiss(err: unknown): void {
-  if (warnedMissing) return;
-  warnedMissing = true;
-  const msg = err instanceof Error ? err.message : String(err);
-  if (/Cannot query field|Unknown type|not exist/i.test(msg)) {
-    console.warn(
-      "[panth-testimonials] panthTestimonials field missing — install/enable Panth_Testimonials.",
-    );
-  } else {
-    console.warn("[panth-testimonials] query failed:", msg);
-  }
+interface TestimonialRow {
+  customer_name: string;
+  customer_title: string | null;
+  customer_company: string | null;
+  customer_image: string | null;
+  rating: number;
+  title: string;
+  content: string;
+  short_content: string | null;
+  created_at: string;
 }
 
-/**
- * Returns a page of testimonials. Never throws. On any error or schema
- * mismatch, returns an empty page with the requested pagination shape.
- */
 export async function getTestimonials(
   pageSize: number = 12,
   currentPage: number = 1,
 ): Promise<TestimonialsPage> {
-  const empty: TestimonialsPage = {
-    items: [],
-    currentPage,
-    pageSize,
-    totalPages: 0,
-  };
+  const size = Math.max(1, Math.floor(pageSize));
+  const page = Math.max(1, Math.floor(currentPage));
+  const offset = (page - 1) * size;
 
-  const doc = /* GraphQL */ `
-    query PanthTestimonials($pageSize: Int!, $currentPage: Int!) {
-      panthTestimonials(pageSize: $pageSize, currentPage: $currentPage) {
-        items {
-          customer_name
-          photo
-          rating
-          title
-          body
-          created_at
-        }
-        page_info {
-          total_pages
-          current_page
-          page_size
-        }
-      }
-    }
-  `;
+  const rows = await panthQuery<TestimonialRow>(
+    `SELECT customer_name, customer_title, customer_company, customer_image,
+            rating, title, content, short_content, created_at
+       FROM panth_testimonial
+      WHERE status = 1
+      ORDER BY is_featured DESC, sort_order ASC, testimonial_id ASC
+      LIMIT ${size} OFFSET ${offset}`,
+  );
 
-  try {
-    const raw = await query<unknown>(doc, { pageSize, currentPage });
-    const parsed = Envelope.safeParse(raw);
-    if (!parsed.success) return empty;
-    const env = parsed.data.panthTestimonials;
-    if (!env) return empty;
-    const items = (env.items ?? []).filter(
-      (t): t is TestimonialT => t !== null && t !== undefined,
-    );
-    const info = env.page_info ?? {};
-    return {
-      items,
-      currentPage: info.current_page ?? currentPage,
-      pageSize: info.page_size ?? pageSize,
-      totalPages: info.total_pages ?? 0,
-    };
-  } catch (err) {
-    logSchemaMiss(err);
-    return empty;
-  }
+  const totalRows = await panthQuery<{ total: number }>(
+    "SELECT COUNT(*) AS total FROM panth_testimonial WHERE status = 1",
+  );
+  const total = totalRows[0]?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / size));
+
+  const items: TestimonialT[] = rows.map((r) => ({
+    customer_name: r.customer_name,
+    customer_title: r.customer_title,
+    customer_company: r.customer_company,
+    photo: r.customer_image,
+    rating: r.rating,
+    title: r.title,
+    body: r.short_content ?? r.content,
+    created_at: r.created_at,
+  }));
+
+  return { items, currentPage: page, pageSize: size, totalPages };
 }

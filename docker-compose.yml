@@ -69,6 +69,14 @@ services:
       - MAGENTO_INTERNAL_HOST=${PROJECT_DOMAIN}
       - PUBLIC_SITE_URL=https://${PROJECT_DOMAIN}
       - PUBLIC_MEDIA_URL=https://${PROJECT_DOMAIN}/media
+      # Direct MySQL read for Panth storefront widgets (banner slider, FAQs,
+      # testimonials, WhatsApp, notification bar). The Panth* modules do not
+      # expose GraphQL resolvers, so we read the seeded tables directly.
+      - PANTH_DB_HOST=${DB_HOST:-mysql}
+      - PANTH_DB_PORT=3306
+      - PANTH_DB_NAME=${DB_NAME:-magento_mage2react}
+      - PANTH_DB_USER=${DB_USER:-magento}
+      - PANTH_DB_PASSWORD=${DB_PASSWORD:-magento123}
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=dev_network"
