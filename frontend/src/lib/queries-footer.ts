@@ -78,17 +78,17 @@ const DEFAULT_CONFIG: FooterConfig = {
       title: "Shop",
       links: [
         { label: "New Arrivals", url: "/what-is-new.html" },
-        { label: "Best Sellers", url: "/women.html" },
+        { label: "Women", url: "/women.html" },
+        { label: "Men", url: "/men.html" },
         { label: "Sale", url: "/sale.html" },
-        { label: "Gift Cards", url: "/gift-card" },
       ],
     },
     {
       title: "Customer Service",
       links: [
         { label: "Contact Us", url: "/contact" },
-        { label: "Shipping Info", url: "/shipping-information" },
-        { label: "Returns", url: "/returns" },
+        { label: "Customer Service", url: "/customer-service" },
+        { label: "About Us", url: "/about-us" },
         { label: "FAQ", url: "/faq" },
       ],
     },
