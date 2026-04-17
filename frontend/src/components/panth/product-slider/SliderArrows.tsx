@@ -1,9 +1,11 @@
 /**
  * SliderArrows.tsx — tiny client:idle island for `ProductSlider.astro`.
  *
- * Finds the sibling `[data-slider-track]` by id (looked up once via a ref
- * traversal — no direct `document.querySelector` on render) and scrolls it
- * left/right by roughly one card width. Keyboard-accessible arrow buttons.
+ * Finds the sibling `[data-slider-track]` by id (looked up once via the host
+ * element's `ownerDocument` — no direct `document.querySelector` in render)
+ * and scrolls it left/right by roughly one card width. Keyboard-accessible
+ * arrow buttons with `aria-label`, and the `disabled` state reflects whether
+ * the track is already pinned to the start / end.
  *
  * We intentionally keep this tiny so the zero-JS CSS scroll-snap experience
  * stays the default and the arrows only enhance it.
@@ -20,17 +22,34 @@ export default function SliderArrows({
   trackId,
   labelPrev = "Scroll left",
   labelNext = "Scroll right",
-}: Props): JSX.Element | null {
+}: Props): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const trackRef = useRef<HTMLElement | null>(null);
   const [mounted, setMounted] = useState(false);
   const [atStart, setAtStart] = useState(true);
   const [atEnd, setAtEnd] = useState(false);
 
+  const updateEdges = useCallback((): void => {
+    const el = trackRef.current;
+    if (!el) return;
+    const max = el.scrollWidth - el.clientWidth;
+    setAtStart(el.scrollLeft <= 2);
+    setAtEnd(el.scrollLeft >= max - 2);
+  }, []);
+
+  const scrollByStep = useCallback((dir: -1 | 1): void => {
+    const el = trackRef.current;
+    if (!el) return;
+    // ~1 card width; measure the first child for precision.
+    const firstCard = el.firstElementChild as HTMLElement | null;
+    const step = firstCard
+      ? firstCard.getBoundingClientRect().width + 16
+      : el.clientWidth * 0.8;
+    el.scrollBy({ left: dir * step, behavior: "smooth" });
+  }, []);
+
   useEffect(() => {
     setMounted(true);
-    // Locate the track via the ownerDocument of our host element — this keeps
-    // the lookup scoped and avoids a global `document.querySelector` in render.
     const host = hostRef.current;
     if (!host) return;
     const doc = host.ownerDocument;
@@ -46,28 +65,10 @@ export default function SliderArrows({
       if (t) t.removeEventListener("scroll", updateEdges);
       window.removeEventListener("resize", updateEdges);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trackId]);
-
-  const updateEdges = useCallback((): void => {
-    const el = trackRef.current;
-    if (!el) return;
-    const max = el.scrollWidth - el.clientWidth;
-    setAtStart(el.scrollLeft <= 2);
-    setAtEnd(el.scrollLeft >= max - 2);
-  }, []);
-
-  const scrollBy = useCallback((dir: -1 | 1): void => {
-    const el = trackRef.current;
-    if (!el) return;
-    // ~1 card worth; we measure the first child for precision.
-    const firstCard = el.firstElementChild as HTMLElement | null;
-    const step = firstCard ? firstCard.getBoundingClientRect().width + 16 : el.clientWidth * 0.8;
-    el.scrollBy({ left: dir * step, behavior: "smooth" });
-  }, []);
+  }, [trackId, updateEdges]);
 
   if (!mounted) {
-    // Render a stable placeholder on first paint to avoid hydration drift.
+    // Stable placeholder on first paint to avoid hydration drift.
     return <div ref={hostRef} aria-hidden="true" className="contents" />;
   }
 
@@ -75,7 +76,7 @@ export default function SliderArrows({
     <div ref={hostRef} className="flex items-center gap-2">
       <button
         type="button"
-        onClick={() => scrollBy(-1)}
+        onClick={() => scrollByStep(-1)}
         disabled={atStart}
         aria-label={labelPrev}
         className="grid size-10 place-items-center rounded-full border border-zinc-300 bg-white text-zinc-700 shadow-sm transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
@@ -93,7 +94,7 @@ export default function SliderArrows({
       </button>
       <button
         type="button"
-        onClick={() => scrollBy(1)}
+        onClick={() => scrollByStep(1)}
         disabled={atEnd}
         aria-label={labelNext}
         className="grid size-10 place-items-center rounded-full border border-zinc-300 bg-white text-zinc-700 shadow-sm transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"

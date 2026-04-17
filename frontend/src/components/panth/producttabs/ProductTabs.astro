@@ -100,7 +100,10 @@ const containerId = "panth-producttabs";
       ))}
     </div>
 
-    {/* Desktop panels */}
+    {/* Desktop panels. Astro named slots may be consumed in multiple render
+        sites — the reviews slot here and in the mobile accordion below will
+        both render their content; only one is visible at a time thanks to
+        the `hidden md:block` / `md:hidden` sibling-layout split. */}
     <div class="panth-panels hidden md:block">
       {renderTabs.map((tab) => (
         <section

@@ -1,0 +1,73 @@
+---
+/**
+ * FaqAccordion.astro — drop-in reusable FAQ accordion (Astro only, zero-JS).
+ *
+ * Uses native `<details>` / `<summary>` so it works without hydration and
+ * remains keyboard-accessible by default. Answers are piped through
+ * `sanitizeHtml()` before rendering.
+ *
+ * Props:
+ *   - items: [{ question, answer }, ...] — plain text question, HTML answer.
+ *   - openFirst?: boolean — open the first item by default (default false).
+ *   - headingLevel?: 2 | 3 | 4 — heading level for questions (default 3).
+ */
+import { sanitizeHtml } from "~/lib/sanitize";
+
+interface FaqAccordionItem {
+  question: string;
+  answer: string;
+}
+
+interface Props {
+  items: ReadonlyArray<FaqAccordionItem>;
+  openFirst?: boolean;
+  headingLevel?: 2 | 3 | 4;
+}
+
+const { items, openFirst = false, headingLevel = 3 } = Astro.props as Props;
+
+function plainQ(v: string): string {
+  return sanitizeHtml(v).replace(/<[^>]*>/g, "").trim();
+}
+
+function cleanAnswer(v: string): string {
+  return sanitizeHtml(v);
+}
+
+const HeadingTag = `h${headingLevel}` as "h2" | "h3" | "h4";
+---
+
+{items.length > 0 && (
+  <div class="divide-y divide-[var(--color-border)] overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+    {items.map((it, idx) => (
+      <details
+        class="group px-4"
+        open={openFirst && idx === 0 ? true : undefined}
+      >
+        <summary class="flex cursor-pointer items-center justify-between gap-3 py-4 text-left font-medium text-[var(--color-fg)] marker:content-['']">
+          <HeadingTag class="m-0 text-base font-medium">
+            {plainQ(it.question)}
+          </HeadingTag>
+          <svg
+            viewBox="0 0 24 24"
+            width="18"
+            height="18"
+            aria-hidden="true"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="shrink-0 text-[var(--color-fg-muted)] transition-transform group-open:rotate-180"
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </summary>
+        <div
+          class="pb-4 text-sm text-[var(--color-fg)] [&_a]:text-[var(--color-brand)] [&_a:hover]:underline [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5"
+          set:html={cleanAnswer(it.answer)}
+        />
+      </details>
+    ))}
+  </div>
+)}

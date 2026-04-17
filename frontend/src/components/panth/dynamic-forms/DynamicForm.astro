@@ -1,0 +1,275 @@
+---
+/**
+ * DynamicForm.astro — SSR renderer for any admin-defined form from
+ * `Panth_DynamicForms`.
+ *
+ * Props:
+ *   - slug: the dynamic-form slug (required)
+ *
+ * Behaviour:
+ *   - Fetches the form definition server-side.
+ *   - Renders nothing when the slug doesn't resolve (safe for embedding on
+ *     pages that may or may not have a matching form configured).
+ *   - POSTs to `/api/panth/dynamic-forms/submit`. Server re-validates every
+ *     value against the same field definitions.
+ *
+ * Security:
+ *   - Labels / help text pass through `sanitizeHtml()` + tag strip.
+ *   - File inputs enforce the shared attachment allowlist (PDF/image/text/ZIP,
+ *     max 10 MB). Executables are rejected client-side AND server-side.
+ */
+import { getDynamicForm, type DynamicField } from "~/lib/queries-dynamic-forms";
+import { sanitizeHtml } from "~/lib/sanitize";
+
+interface Props {
+  slug: string;
+}
+
+const { slug } = Astro.props as Props;
+const form = await getDynamicForm(slug);
+
+function plain(v: string | null | undefined): string {
+  if (!v) return "";
+  return sanitizeHtml(v).replace(/<[^>]*>/g, "").trim();
+}
+
+function fieldName(f: DynamicField): string {
+  return `f_${f.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+}
+
+const domId = `panth-dyn-${slug.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+---
+
+{form && (
+  <form
+    id={domId}
+    data-panth-dynamic-form
+    data-slug={form.slug}
+    class="flex flex-col gap-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-5"
+    aria-label={plain(form.title)}
+    enctype="multipart/form-data"
+    novalidate
+  >
+    <div>
+      <h2 class="text-lg font-semibold text-[var(--color-fg)]">{plain(form.title)}</h2>
+      {form.description && (
+        <p class="mt-1 text-sm text-[var(--color-fg-muted)]">{plain(form.description)}</p>
+      )}
+    </div>
+
+    {form.fields.map((f) => {
+      const name = fieldName(f);
+      const label = plain(f.label);
+      const placeholder = plain(f.placeholder ?? "");
+      const help = plain(f.help_text ?? "");
+      const helpId = help ? `${name}-help` : undefined;
+
+      if (f.type === "textarea") {
+        return (
+          <div class="flex flex-col gap-1">
+            <label for={name} class="text-sm font-medium text-[var(--color-fg)]">
+              {label}{f.required && <span aria-hidden="true" class="ml-0.5 text-[var(--color-danger,theme(colors.red.700))]">*</span>}
+            </label>
+            <textarea
+              id={name}
+              name={name}
+              required={f.required}
+              placeholder={placeholder || undefined}
+              rows={5}
+              maxlength={10000}
+              aria-describedby={helpId}
+              class="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+            />
+            {help && <p id={helpId} class="text-xs text-[var(--color-fg-muted)]">{help}</p>}
+          </div>
+        );
+      }
+
+      if (f.type === "select") {
+        return (
+          <div class="flex flex-col gap-1">
+            <label for={name} class="text-sm font-medium text-[var(--color-fg)]">
+              {label}{f.required && <span aria-hidden="true" class="ml-0.5 text-[var(--color-danger,theme(colors.red.700))]">*</span>}
+            </label>
+            <select
+              id={name}
+              name={name}
+              required={f.required}
+              aria-describedby={helpId}
+              class="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+            >
+              <option value="">Select an option</option>
+              {f.options.map((o) => (
+                <option value={o.value}>{plain(o.label)}</option>
+              ))}
+            </select>
+            {help && <p id={helpId} class="text-xs text-[var(--color-fg-muted)]">{help}</p>}
+          </div>
+        );
+      }
+
+      if (f.type === "radio") {
+        return (
+          <fieldset class="flex flex-col gap-1">
+            <legend class="text-sm font-medium text-[var(--color-fg)]">
+              {label}{f.required && <span aria-hidden="true" class="ml-0.5 text-[var(--color-danger,theme(colors.red.700))]">*</span>}
+            </legend>
+            <div class="flex flex-wrap gap-3 pt-1">
+              {f.options.map((o, idx) => (
+                <label class="flex items-center gap-2 text-sm text-[var(--color-fg)]">
+                  <input
+                    type="radio"
+                    name={name}
+                    value={o.value}
+                    required={f.required && idx === 0}
+                    class="accent-[var(--color-brand)]"
+                  />
+                  <span>{plain(o.label)}</span>
+                </label>
+              ))}
+            </div>
+            {help && <p class="text-xs text-[var(--color-fg-muted)]">{help}</p>}
+          </fieldset>
+        );
+      }
+
+      if (f.type === "checkbox") {
+        return (
+          <div>
+            <label class="flex items-center gap-2 text-sm text-[var(--color-fg)]">
+              <input
+                type="checkbox"
+                name={name}
+                value="on"
+                required={f.required}
+                class="accent-[var(--color-brand)]"
+              />
+              <span>{label}{f.required && <span aria-hidden="true" class="ml-0.5 text-[var(--color-danger,theme(colors.red.700))]">*</span>}</span>
+            </label>
+            {help && <p class="pl-6 text-xs text-[var(--color-fg-muted)]">{help}</p>}
+          </div>
+        );
+      }
+
+      if (f.type === "file") {
+        return (
+          <div class="flex flex-col gap-1">
+            <label for={name} class="text-sm font-medium text-[var(--color-fg)]">
+              {label}{f.required && <span aria-hidden="true" class="ml-0.5 text-[var(--color-danger,theme(colors.red.700))]">*</span>}
+            </label>
+            <input
+              id={name}
+              name={name}
+              type="file"
+              required={f.required}
+              accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.zip,application/pdf,image/png,image/jpeg,image/webp,text/plain,application/zip"
+              aria-describedby={helpId}
+              class="block w-full text-sm text-[var(--color-fg)] file:mr-3 file:rounded-md file:border-0 file:bg-[var(--color-muted)] file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-[var(--color-fg)]"
+            />
+            <p class="text-xs text-[var(--color-fg-muted)]">Max 10 MB. Allowed: PDF, PNG, JPG, JPEG, WebP, TXT, ZIP.</p>
+            {help && <p id={helpId} class="text-xs text-[var(--color-fg-muted)]">{help}</p>}
+          </div>
+        );
+      }
+
+      if (f.type === "number" || f.type === "date") {
+        return (
+          <div class="flex flex-col gap-1">
+            <label for={name} class="text-sm font-medium text-[var(--color-fg)]">
+              {label}{f.required && <span aria-hidden="true" class="ml-0.5 text-[var(--color-danger,theme(colors.red.700))]">*</span>}
+            </label>
+            <input
+              id={name}
+              name={name}
+              type={f.type}
+              required={f.required}
+              placeholder={placeholder || undefined}
+              min={f.min ?? undefined}
+              max={f.max ?? undefined}
+              aria-describedby={helpId}
+              class="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+            />
+            {help && <p id={helpId} class="text-xs text-[var(--color-fg-muted)]">{help}</p>}
+          </div>
+        );
+      }
+
+      const inputType = f.type === "email" ? "email" : f.type === "tel" ? "tel" : "text";
+      return (
+        <div class="flex flex-col gap-1">
+          <label for={name} class="text-sm font-medium text-[var(--color-fg)]">
+            {label}{f.required && <span aria-hidden="true" class="ml-0.5 text-[var(--color-danger,theme(colors.red.700))]">*</span>}
+          </label>
+          <input
+            id={name}
+            name={name}
+            type={inputType}
+            required={f.required}
+            placeholder={placeholder || undefined}
+            maxlength={inputType === "email" ? 254 : 2000}
+            autocomplete={inputType === "email" ? "email" : inputType === "tel" ? "tel" : "off"}
+            aria-describedby={helpId}
+            class="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+          />
+          {help && <p id={helpId} class="text-xs text-[var(--color-fg-muted)]">{help}</p>}
+        </div>
+      );
+    })}
+
+    <button
+      type="submit"
+      class="inline-flex items-center justify-center rounded-md bg-[var(--color-brand)] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+    >
+      Submit
+    </button>
+
+    <p
+      class="text-sm"
+      role="status"
+      aria-live="polite"
+      data-panth-dynamic-status
+    ></p>
+  </form>
+)}
+
+<script is:inline>
+  (function () {
+    var forms = document.querySelectorAll("[data-panth-dynamic-form]");
+    forms.forEach(function (form) {
+      if (!(form instanceof HTMLFormElement)) return;
+      var status = form.querySelector("[data-panth-dynamic-status]");
+      var btn = form.querySelector('button[type="submit"]');
+      function setStatus(msg, ok) {
+        if (!status) return;
+        status.textContent = msg;
+        status.style.color = ok
+          ? "var(--color-success, #065f46)"
+          : "var(--color-danger, #991b1b)";
+      }
+      form.addEventListener("submit", async function (ev) {
+        ev.preventDefault();
+        var fd = new FormData(form);
+        fd.append("slug", form.getAttribute("data-slug") || "");
+        if (btn instanceof HTMLButtonElement) btn.disabled = true;
+        setStatus("Submitting...", true);
+        try {
+          var res = await fetch("/api/panth/dynamic-forms/submit", {
+            method: "POST",
+            body: fd,
+          });
+          var data = await res.json().catch(function () { return {}; });
+          if (!res.ok) {
+            setStatus((data && data.message) || "Could not submit. Please try again.", false);
+          } else {
+            setStatus((data && data.message) || "Thanks — we received your submission.", true);
+            form.reset();
+          }
+        } catch {
+          setStatus("Network error. Please try again.", false);
+        } finally {
+          if (btn instanceof HTMLButtonElement) btn.disabled = false;
+        }
+      });
+    });
+  })();
+</script>

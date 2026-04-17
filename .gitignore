@@ -4,9 +4,12 @@
 .env.*.local
 
 # Magento 2 source tree — too large for version control.
-# Keep ONLY our custom module.
+# Keep ONLY our custom modules + composer manifests so a fresh install can
+# reproduce the exact extension set.
 src/*
 !src/app
+!src/composer.json
+!src/composer.lock
 src/app/*
 !src/app/code
 src/app/code/*

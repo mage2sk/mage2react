@@ -1,0 +1,123 @@
+---
+/**
+ * AttachmentsList.astro — drop-in list of product-attachment download links.
+ *
+ * Data source: `Panth_ProductAttachments` via the
+ * `ProductInterface.panth_attachments` GraphQL extension. The caller passes
+ * the already-fetched list; this component handles sanitization, URL
+ * allowlisting, icon picking, and size formatting.
+ *
+ * Security:
+ *   - Every URL is validated against an http(s) or same-origin-relative
+ *     allowlist.
+ *   - Labels are plain-text via `sanitizeHtml()` + tag strip.
+ *   - Links open in a new tab with `rel="noopener noreferrer"` and
+ *     `data-astro-reload` so the browser escapes any SPA swap.
+ */
+import {
+  extractAttachments,
+  formatAttachmentSize,
+  type PanthAttachmentT,
+} from "~/lib/queries-product-attachments";
+import { sanitizeHtml } from "~/lib/sanitize";
+
+interface Props {
+  // Accept either the raw GraphQL `panth_attachments` array or the
+  // already-extracted typed list. The component normalizes both.
+  items?: ReadonlyArray<unknown> | null;
+  title?: string;
+}
+
+const { items = [], title = "Downloads" } = Astro.props as Props;
+
+function plain(v: string): string {
+  return sanitizeHtml(v).replace(/<[^>]*>/g, "").trim();
+}
+
+function looksTyped(list: ReadonlyArray<unknown>): list is ReadonlyArray<PanthAttachmentT> {
+  if (list.length === 0) return false;
+  const first = list[0];
+  return (
+    first !== null &&
+    typeof first === "object" &&
+    "url" in first &&
+    "label" in first &&
+    "type" in first
+  );
+}
+
+const list = (items ?? []) as ReadonlyArray<unknown>;
+const attachments: PanthAttachmentT[] = looksTyped(list)
+  ? [...list]
+  : extractAttachments({ panth_attachments: list });
+
+const hasItems = attachments.length > 0;
+---
+
+{hasItems && (
+  <section
+    aria-label={title}
+    class="flex flex-col gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4"
+  >
+    <h2 class="text-base font-semibold text-[var(--color-fg)]">{plain(title)}</h2>
+    <ul class="flex flex-col divide-y divide-[var(--color-border)]">
+      {attachments.map((a) => (
+        <li>
+          <a
+            href={a.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-astro-reload
+            class="flex items-center gap-3 py-3 text-sm text-[var(--color-fg)] hover:text-[var(--color-brand)] focus:outline-none focus-visible:text-[var(--color-brand)]"
+            download
+          >
+            <span class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[var(--color-muted)] text-[var(--color-fg-muted)]" aria-hidden="true">
+              {a.type === "pdf" && (
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 7V3.5L18.5 9H13z" />
+                </svg>
+              )}
+              {a.type === "doc" && (
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zM8 13h8v1H8v-1zm0 3h8v1H8v-1zm0-6h5v1H8v-1z" />
+                </svg>
+              )}
+              {a.type === "zip" && (
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-3 4h2v2h-2V6zm0 4h2v2h-2v-2zm0 4h2v2h-2v-2z" />
+                </svg>
+              )}
+              {a.type === "txt" && (
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zM7 12h10v1H7v-1zm0 3h10v1H7v-1zm0 3h7v1H7v-1z" />
+                </svg>
+              )}
+              {a.type === "image" && (
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                  <path d="M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2zM8.5 13.5l2.5 3 3.5-4.5 4.5 6H5l3.5-4.5z" />
+                </svg>
+              )}
+              {(a.type === "other" || !["pdf","doc","zip","txt","image"].includes(a.type)) && (
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 7V3.5L18.5 9H13z" />
+                </svg>
+              )}
+            </span>
+            <span class="flex-1">
+              <span class="block font-medium">{plain(a.label)}</span>
+              <span class="block text-xs text-[var(--color-fg-muted)]">
+                {a.type.toUpperCase()}
+                {a.size !== null && formatAttachmentSize(a.size) ? ` · ${formatAttachmentSize(a.size)}` : ""}
+              </span>
+            </span>
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-[var(--color-fg-muted)]">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+          </a>
+        </li>
+      ))}
+    </ul>
+  </section>
+)}

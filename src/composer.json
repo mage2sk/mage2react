@@ -1,0 +1,141 @@
+{
+    "name": "magento/project-community-edition",
+    "description": "eCommerce Platform for Growth (Community Edition)",
+    "type": "project",
+    "license": [
+        "OSL-3.0",
+        "AFL-3.0"
+    ],
+    "config": {
+        "allow-plugins": {
+            "dealerdirect/phpcodesniffer-composer-installer": true,
+            "laminas/laminas-dependency-plugin": true,
+            "magento/*": true,
+            "php-http/discovery": true
+        },
+        "preferred-install": "dist",
+        "sort-packages": true
+    },
+    "version": "2.4.8-p4",
+    "require": {
+        "mage2kishan/module-advanced-contact-us": "^1.0",
+        "mage2kishan/module-advanced-seo": "^1.0",
+        "mage2kishan/module-advancedcart": "^1.0",
+        "mage2kishan/module-banner-slider": "^1.0",
+        "mage2kishan/module-cachemanager": "^1.0",
+        "mage2kishan/module-checkout-extended": "^1.0",
+        "mage2kishan/module-checkout-success": "^1.0",
+        "mage2kishan/module-core": "^1.0",
+        "mage2kishan/module-corewebvitals": "^1.0",
+        "mage2kishan/module-custom-options": "^1.0",
+        "mage2kishan/module-dynamic-forms": "^1.0",
+        "mage2kishan/module-extra-fee": "^1.0",
+        "mage2kishan/module-faq": "^1.0",
+        "mage2kishan/module-footer": "^1.0",
+        "mage2kishan/module-imageoptimizer": "^1.0",
+        "mage2kishan/module-live-activity": "^1.0",
+        "mage2kishan/module-low-stock-notification": "^1.0",
+        "mage2kishan/module-malware-scanner": "^1.0",
+        "mage2kishan/module-mega-menu": "^1.0",
+        "mage2kishan/module-not-found-page": "^1.0",
+        "mage2kishan/module-notification-bar": "^1.0",
+        "mage2kishan/module-order-attachments": "^1.0",
+        "mage2kishan/module-order-cleanup": "^1.0",
+        "mage2kishan/module-ordered-items": "^1.0",
+        "mage2kishan/module-pagebuilder-ai": "^1.0",
+        "mage2kishan/module-performance-optimizer": "^1.0",
+        "mage2kishan/module-price-drop-alert": "^1.0",
+        "mage2kishan/module-product-attachments": "^1.0",
+        "mage2kishan/module-product-slider": "^1.0",
+        "mage2kishan/module-productgallery": "^1.0",
+        "mage2kishan/module-producttabs": "^1.0",
+        "mage2kishan/module-quickview": "^1.0",
+        "mage2kishan/module-search-autocomplete": "^1.0",
+        "mage2kishan/module-smart-badge": "^1.0",
+        "mage2kishan/module-testimonials": "^1.0",
+        "mage2kishan/module-theme-customizer": "^1.0",
+        "mage2kishan/module-whatsapp": "^1.0",
+        "mage2kishan/module-zipcode-validation": "^1.0",
+        "magento/composer-dependency-version-audit-plugin": "~0.1",
+        "magento/composer-root-update-plugin": "^2.0.4",
+        "magento/module-bundle-sample-data": "*",
+        "magento/module-catalog-rule-sample-data": "*",
+        "magento/module-catalog-sample-data": "*",
+        "magento/module-cms-sample-data": "*",
+        "magento/module-configurable-sample-data": "*",
+        "magento/module-customer-sample-data": "*",
+        "magento/module-downloadable-sample-data": "*",
+        "magento/module-grouped-product-sample-data": "*",
+        "magento/module-msrp-sample-data": "*",
+        "magento/module-offline-shipping-sample-data": "*",
+        "magento/module-product-links-sample-data": "*",
+        "magento/module-review-sample-data": "*",
+        "magento/module-sales-rule-sample-data": "*",
+        "magento/module-sales-sample-data": "*",
+        "magento/module-swatches-sample-data": "*",
+        "magento/module-tax-sample-data": "*",
+        "magento/module-theme-sample-data": "*",
+        "magento/module-widget-sample-data": "*",
+        "magento/module-wishlist-sample-data": "*",
+        "magento/product-community-edition": "2.4.8-p4",
+        "magento/sample-data-media": "*"
+    },
+    "autoload": {
+        "exclude-from-classmap": [
+            "**/dev/**",
+            "**/update/**",
+            "*/*/Test/**/*Test"
+        ],
+        "files": [
+            "app/etc/NonComposerComponentRegistration.php"
+        ],
+        "psr-0": {
+            "": [
+                "app/code/",
+                "generated/code/"
+            ]
+        },
+        "psr-4": {
+            "Magento\\Setup\\": "setup/src/Magento/Setup/"
+        }
+    },
+    "require-dev": {
+        "allure-framework/allure-phpunit": "^3.1",
+        "carlos-mg89/oauth": "^0.8.17",
+        "dealerdirect/phpcodesniffer-composer-installer": "^0.7 || ^1.0",
+        "dg/bypass-finals": "^1.4",
+        "friendsofphp/php-cs-fixer": "^3.22",
+        "magento/magento-coding-standard": "*",
+        "magento/magento2-functional-testing-framework": "^5.0",
+        "pdepend/pdepend": "3.x-dev",
+        "phpmd/phpmd": "3.x-dev",
+        "phpstan/phpstan": "^1.9",
+        "phpunit/phpunit": "^10.5",
+        "symfony/finder": "^6.4",
+        "magento/magento-allure-phpunit": "^3.0.2"
+    },
+    "conflict": {
+        "gene/bluefoot": "*"
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Magento\\PhpStan\\": "dev/tests/static/framework/Magento/PhpStan/",
+            "Magento\\Sniffs\\": "dev/tests/static/framework/Magento/Sniffs/",
+            "Magento\\TestFramework\\Inspection\\": "dev/tests/static/framework/Magento/TestFramework/Inspection/",
+            "Magento\\TestFramework\\Utility\\": "dev/tests/static/framework/Magento/TestFramework/Utility/",
+            "Magento\\Tools\\": "dev/tools/Magento/Tools/",
+            "Magento\\Tools\\Sanity\\": "dev/build/publication/sanity/Magento/Tools/Sanity/"
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "repositories": [
+        {
+            "type": "composer",
+            "url": "https://repo.magento.com/"
+        }
+    ],
+    "extra": {
+        "magento-force": "override"
+    }
+}

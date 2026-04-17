@@ -1,0 +1,150 @@
+---
+/**
+ * /faq — SSR FAQ page backed by `Panth_Faq`.
+ *
+ * Query-string controls:
+ *   - `?category=<id>` — filter to a single category (by id)
+ *   - `?page=<n>`      — 1-indexed pagination, clamped to >= 1
+ *
+ * Emits `FAQPage` JSON-LD using the shared `faqPageLd()` helper so that
+ * Google / Bing get structured data for every visible question on the page.
+ * Nothing is emitted if the feed is empty (don't offer empty FAQPage
+ * rich-result signals).
+ */
+import Layout from "~/layouts/Base.astro";
+import FaqAccordion from "~/components/panth/faq/FaqAccordion.astro";
+import { getFaqCategories, getFaqItems } from "~/lib/queries-faq";
+import { sanitizeHtml } from "~/lib/sanitize";
+import { faqPageLd } from "~/lib/jsonld";
+
+export const prerender = false;
+
+const PAGE_SIZE = 24;
+
+const url = Astro.url;
+const rawPage = url.searchParams.get("page");
+const parsedPage = rawPage ? Number.parseInt(rawPage, 10) : 1;
+const currentPage = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
+
+const rawCategory = url.searchParams.get("category");
+const categoryId = rawCategory && rawCategory.trim().length > 0 ? rawCategory.trim() : null;
+
+const [categories, { items, totalPages }] = await Promise.all([
+  getFaqCategories(),
+  getFaqItems(categoryId, currentPage, PAGE_SIZE),
+]);
+
+const hasItems = items.length > 0;
+const hasCategories = categories.length > 0;
+const hasPrev = currentPage > 1;
+const hasNext = currentPage < totalPages;
+
+function plainQ(v: string): string {
+  return sanitizeHtml(v).replace(/<[^>]*>/g, "").trim();
+}
+
+function plainA(v: string): string {
+  // JSON-LD Answer.text must be plain; collapse HTML and whitespace.
+  return sanitizeHtml(v).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function buildHref(overrides: Record<string, string | null>): string {
+  const params = new URLSearchParams(url.searchParams);
+  for (const [k, v] of Object.entries(overrides)) {
+    if (v === null) params.delete(k);
+    else params.set(k, v);
+  }
+  const q = params.toString();
+  return q ? `/faq?${q}` : "/faq";
+}
+
+const jsonLd = hasItems
+  ? faqPageLd(items.map((it) => ({ question: plainQ(it.question), answer: plainA(it.answer) })))
+  : null;
+---
+
+<Layout title="Frequently Asked Questions" description="Answers to common questions.">
+  <main class="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-8">
+    <header>
+      <h1 class="text-2xl font-semibold text-[var(--color-fg)]">Frequently Asked Questions</h1>
+      <p class="mt-1 text-sm text-[var(--color-fg-muted)]">
+        Browse by topic or scroll the full list.
+      </p>
+    </header>
+
+    {hasCategories && (
+      <nav aria-label="FAQ categories" class="flex flex-wrap gap-2">
+        <a
+          href={buildHref({ category: null, page: null })}
+          class:list={[
+            "rounded-full border px-3 py-1 text-sm",
+            categoryId === null
+              ? "border-[var(--color-brand)] bg-[var(--color-brand)] text-white"
+              : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-fg)] hover:border-[var(--color-brand)]",
+          ]}
+          aria-current={categoryId === null ? "page" : undefined}
+        >
+          All
+        </a>
+        {categories.map((c) => (
+          <a
+            href={buildHref({ category: c.id, page: null })}
+            class:list={[
+              "rounded-full border px-3 py-1 text-sm",
+              categoryId === c.id
+                ? "border-[var(--color-brand)] bg-[var(--color-brand)] text-white"
+                : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-fg)] hover:border-[var(--color-brand)]",
+            ]}
+            aria-current={categoryId === c.id ? "page" : undefined}
+          >
+            {c.name}
+          </a>
+        ))}
+      </nav>
+    )}
+
+    {hasItems ? (
+      <FaqAccordion items={items.map((it) => ({ question: it.question, answer: it.answer }))} />
+    ) : (
+      <p class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-center text-sm text-[var(--color-fg-muted)]">
+        No FAQs yet. Check back soon.
+      </p>
+    )}
+
+    {totalPages > 1 && (
+      <nav aria-label="FAQ pagination" class="flex items-center justify-center gap-3 pt-2">
+        <a
+          href={hasPrev ? buildHref({ page: String(currentPage - 1) }) : "#"}
+          aria-disabled={!hasPrev}
+          class:list={[
+            "rounded-md border border-[var(--color-border)] px-3 py-1 text-sm",
+            hasPrev
+              ? "bg-[var(--color-surface)] text-[var(--color-fg)] hover:border-[var(--color-brand)]"
+              : "pointer-events-none bg-[var(--color-muted)] text-[var(--color-fg-muted)]",
+          ]}
+        >
+          Previous
+        </a>
+        <span class="text-sm text-[var(--color-fg-muted)]">
+          Page {currentPage} of {totalPages}
+        </span>
+        <a
+          href={hasNext ? buildHref({ page: String(currentPage + 1) }) : "#"}
+          aria-disabled={!hasNext}
+          class:list={[
+            "rounded-md border border-[var(--color-border)] px-3 py-1 text-sm",
+            hasNext
+              ? "bg-[var(--color-surface)] text-[var(--color-fg)] hover:border-[var(--color-brand)]"
+              : "pointer-events-none bg-[var(--color-muted)] text-[var(--color-fg-muted)]",
+          ]}
+        >
+          Next
+        </a>
+      </nav>
+    )}
+  </main>
+
+  {jsonLd && (
+    <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
+  )}
+</Layout>

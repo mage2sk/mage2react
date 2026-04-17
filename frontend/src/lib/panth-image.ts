@@ -22,17 +22,11 @@ export interface PanthImageOpts {
   queryString?: boolean;
 }
 
-const MEDIA_PREFIX =
-  (typeof import.meta !== "undefined"
-    ? (import.meta.env?.PUBLIC_MEDIA_URL ?? "/media")
-    : "/media"
-  ).replace(/\/+$/, "");
+const MEDIA_PREFIX = (import.meta.env.PUBLIC_MEDIA_URL ?? "/media").replace(/\/+$/, "");
 
-const OPTIMIZER_PREFIX =
-  (typeof import.meta !== "undefined"
-    ? (import.meta.env?.PUBLIC_PANTH_OPTIMIZER_PREFIX ?? "/panth-media")
-    : "/panth-media"
-  ).replace(/\/+$/, "");
+const OPTIMIZER_PREFIX = (
+  import.meta.env.PUBLIC_PANTH_OPTIMIZER_PREFIX ?? "/panth-media"
+).replace(/\/+$/, "");
 
 function sanitiseInt(v: number | undefined): number | null {
   if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) return null;
