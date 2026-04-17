@@ -1,0 +1,70 @@
+---
+/**
+ * <NotificationBarSSR /> — zero-JS SSR fallback for `Panth_NotificationBar`.
+ *
+ * Renders the single highest-priority currently-active bar at the top of
+ * the page. Use alongside (or instead of) the React island. The island will
+ * replace the visible state on hydration; this SSR version ensures the bar
+ * is present on first paint and for no-JS clients.
+ *
+ * Colors are validated against the strict allowlist in
+ * `queries-notification-bar.ts` (`validateBarColor`). Invalid colors are
+ * ignored and the default Tailwind tokens are used.
+ *
+ * Renders nothing when there are zero active bars or the parent module is
+ * absent.
+ *
+ * INTEGRATION: place at the very top of `<body>` in `src/layouts/Base.astro`,
+ * above `<Header />`. This module does not edit `Base.astro`.
+ */
+import {
+  filterActiveBars,
+  getNotificationBars,
+  validateBarColor,
+} from "~/lib/queries-notification-bar";
+import { sanitizeHtml } from "~/lib/sanitize";
+
+const bars = await getNotificationBars();
+const active = filterActiveBars(bars);
+const top = active[0] ?? null;
+
+function isSafeHref(v: string | null | undefined): string | null {
+  if (!v) return null;
+  const s = v.trim();
+  if (!s.length) return null;
+  if (s.startsWith("/") || s.startsWith("#")) return s;
+  if (/^https?:\/\//i.test(s)) return s;
+  return null;
+}
+
+const msgHtml = top?.message ? sanitizeHtml(top.message) : "";
+const bg = top ? validateBarColor(top.bg_color) : null;
+const fg = top ? validateBarColor(top.text_color) : null;
+const href = top ? isSafeHref(top.link) : null;
+
+const styleParts: string[] = [];
+if (bg) styleParts.push(`background-color:${bg}`);
+if (fg) styleParts.push(`color:${fg}`);
+const style = styleParts.join(";");
+---
+{top && (
+  <div
+    role="region"
+    aria-label="Site announcement"
+    class={`w-full text-center text-sm ${bg ? "" : "bg-[var(--color-brand)]"} ${fg ? "" : "text-white"}`}
+    style={style || undefined}
+    data-panth-notification-bar-ssr={top.id}
+  >
+    <div class="mx-auto flex max-w-6xl items-center justify-center gap-2 px-4 py-2">
+      {href ? (
+        <a
+          href={href}
+          class="underline-offset-2 hover:underline"
+          set:html={msgHtml}
+        />
+      ) : (
+        <span set:html={msgHtml} />
+      )}
+    </div>
+  </div>
+)}

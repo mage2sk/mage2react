@@ -1,0 +1,205 @@
+---
+/**
+ * <NotFoundContent /> — admin-managed 404 content renderer for
+ * `Panth_NotFoundPage`.
+ *
+ * Fetches `panthNotFoundPage { title content featured_products { ... } }`
+ * at request time, renders a sanitized title + body, and a compact grid of
+ * featured products. Falls back to a minimal "Page not found" message when
+ * the parent module is absent or returns `null`.
+ *
+ * Replace the content of `src/pages/404.astro` and the inline 404 in
+ * `[...slug].astro`'s fallthrough with:
+ *
+ *   <Base title="Page not found">
+ *     <NotFoundContent />
+ *   </Base>
+ *
+ * This module ships the component; those pages are out of scope.
+ */
+import { z } from "zod";
+import { query } from "~/lib/graphql";
+import { sanitizeHtml } from "~/lib/sanitize";
+
+const FeaturedProduct = z.object({
+  name: z.string().nullable().optional(),
+  url: z.string().nullable().optional(),
+  image: z.string().nullable().optional(),
+  price: z.string().nullable().optional(),
+});
+type FeaturedProductT = z.infer<typeof FeaturedProduct>;
+
+const Envelope = z.object({
+  panthNotFoundPage: z
+    .object({
+      title: z.string().nullable().optional(),
+      content: z.string().nullable().optional(),
+      featured_products: z.array(FeaturedProduct).nullable().optional(),
+    })
+    .nullable()
+    .optional(),
+});
+
+type Result = {
+  title: string | null;
+  content: string | null;
+  featured_products: FeaturedProductT[];
+};
+
+async function getNotFound(): Promise<Result | null> {
+  const doc = /* GraphQL */ `
+    query PanthNotFoundPage {
+      panthNotFoundPage {
+        title
+        content
+        featured_products {
+          name
+          url
+          image
+          price
+        }
+      }
+    }
+  `;
+  try {
+    const raw = await query<unknown>(doc, {});
+    const parsed = Envelope.safeParse(raw);
+    if (!parsed.success) return null;
+    const env = parsed.data.panthNotFoundPage;
+    if (!env) return null;
+    return {
+      title: env.title?.trim() || null,
+      content: env.content?.trim() || null,
+      featured_products: (env.featured_products ?? []).filter(
+        (p): p is FeaturedProductT => p !== null && p !== undefined,
+      ),
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!/Cannot query field|Unknown type|not exist/i.test(msg)) {
+      console.warn("[panth-not-found-page] query failed:", msg);
+    }
+    return null;
+  }
+}
+
+const data = await getNotFound();
+
+function cleanPlain(v: string | null | undefined): string {
+  if (!v) return "";
+  return sanitizeHtml(v).replace(/<[^>]*>/g, "").trim();
+}
+
+function isSafeHref(v: string | null | undefined): string | null {
+  if (!v) return null;
+  const s = v.trim();
+  if (!s.length) return null;
+  if (s.startsWith("/") || s.startsWith("#")) return s;
+  if (/^https?:\/\//i.test(s)) return s;
+  return null;
+}
+
+function asImageSrc(v: string | null | undefined): string | null {
+  if (!v) return null;
+  const s = v.trim();
+  if (!s.length) return null;
+  if (s.startsWith("/") || /^https?:\/\//i.test(s)) return s;
+  return null;
+}
+
+const title = cleanPlain(data?.title) || "Page not found";
+const contentHtml = data?.content ? sanitizeHtml(data.content) : "";
+const products = data?.featured_products ?? [];
+---
+<section class="mx-auto max-w-4xl px-4 py-16 text-center">
+  <p class="text-sm font-semibold uppercase tracking-wide text-[var(--color-brand)]">
+    404
+  </p>
+  <h1 class="mt-2 text-3xl font-bold tracking-tight text-zinc-900 sm:text-4xl">
+    {title}
+  </h1>
+  {contentHtml ? (
+    <div
+      class="prose mx-auto mt-4 max-w-2xl text-zinc-700"
+      set:html={contentHtml}
+    />
+  ) : (
+    <p class="mt-4 text-zinc-600">
+      Sorry, the page you were looking for could not be found.
+    </p>
+  )}
+  <div class="mt-6 flex flex-wrap items-center justify-center gap-3">
+    <a
+      href="/"
+      class="inline-block rounded-md bg-[var(--color-brand)] px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+    >
+      Back to home
+    </a>
+    <a
+      href="/customer-service"
+      class="inline-block rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 hover:border-[var(--color-brand)]"
+    >
+      Contact support
+    </a>
+  </div>
+</section>
+
+{products.length > 0 && (
+  <section class="mx-auto max-w-6xl px-4 pb-16" aria-label="Featured products">
+    <h2 class="mb-4 text-lg font-semibold text-zinc-900">
+      You might also like
+    </h2>
+    <ul
+      class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4"
+      role="list"
+    >
+      {products.map((p) => {
+        const name = cleanPlain(p.name);
+        const href = isSafeHref(p.url);
+        const img = asImageSrc(p.image);
+        const price = cleanPlain(p.price);
+        if (!name) return null;
+        const card = (
+          <article class="flex h-full flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-3">
+            {img ? (
+              <img
+                src={img}
+                alt={name}
+                width="240"
+                height="240"
+                loading="lazy"
+                decoding="async"
+                class="aspect-square w-full rounded object-cover"
+              />
+            ) : (
+              <div
+                class="aspect-square w-full rounded bg-zinc-100"
+                aria-hidden="true"
+              />
+            )}
+            <p class="line-clamp-2 text-sm font-medium text-zinc-900">
+              {name}
+            </p>
+            {price && (
+              <p class="text-sm text-[var(--color-brand)]">{price}</p>
+            )}
+          </article>
+        );
+        return (
+          <li>
+            {href ? (
+              <a
+                href={href}
+                class="block transition hover:-translate-y-0.5 motion-reduce:transition-none"
+              >
+                {card}
+              </a>
+            ) : (
+              card
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  </section>
+)}

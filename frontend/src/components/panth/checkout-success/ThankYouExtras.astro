@@ -1,0 +1,198 @@
+---
+/**
+ * ThankYouExtras.astro
+ *
+ * Panth_CheckoutSuccessReact — SSR-rendered enhancements for the order
+ * confirmation page: social share buttons, inert tracking-pixel
+ * placeholders, a CMS-block slot, and a suggested-products grid.
+ *
+ * INTEGRATION (leave as comments; never auto-wire — do NOT edit
+ * `/frontend/src/pages/checkout/success.astro` from this module):
+ *
+ *   1. Fork the success page and render BELOW the order summary:
+ *
+ *        ---
+ *        import ThankYouExtras from
+ *          "~/components/panth/checkout-success/ThankYouExtras.astro";
+ *        ---
+ *        <ThankYouExtras orderNumber={orderNumber} shareUrl={Astro.url.href} />
+ *
+ *   2. Or compose into a bespoke thank-you template.
+ *
+ * SECURITY:
+ *   - CMS block HTML is passed through `sanitizeHtml()` before injection.
+ *   - Tracking scripts are rendered as inert `<template>` markers — NEVER
+ *     evaluated by this component. Wire your own GA4 / Meta Pixel bridge
+ *     from a project-level script that reads `window.__panthTracking`.
+ *   - All `<img>` tags include width/height/alt/loading.
+ */
+import { getCheckoutSuccess, suggestedProductUrl } from "~/lib/queries-checkout-success";
+import { formatMoney } from "~/lib/money";
+import { sanitizeHtml } from "~/lib/sanitize";
+
+interface Props {
+  orderNumber: string;
+  /** Absolute URL used for social-share targets. Pass `Astro.url.href`. */
+  shareUrl?: string;
+  /** Optional override for the share title (defaults to the configured thank-you title). */
+  shareTitle?: string;
+}
+
+const { orderNumber, shareUrl, shareTitle } = Astro.props as Props;
+
+const data = orderNumber ? await getCheckoutSuccess(orderNumber) : null;
+const enabled = data != null;
+
+const social = data?.social_share ?? null;
+const cmsBlock = data?.cms_block_html ? sanitizeHtml(data.cms_block_html) : null;
+const tracking = data?.tracking_scripts ?? [];
+const suggested = data?.suggested_products ?? [];
+
+const resolvedTitle = sanitizeHtml(
+  shareTitle ?? data?.thank_you_title ?? "I just placed an order!",
+);
+const encodedUrl = shareUrl ? encodeURIComponent(shareUrl) : "";
+const encodedTitle = encodeURIComponent(resolvedTitle);
+
+// Track-script data envelope for custom integrations. We NEVER render the
+// HTML; downstream pages can read window.__panthTracking and decide how to
+// fire pixels in line with their consent flow.
+const trackingPayload = tracking.map((t) => ({
+  code: t.code ?? "",
+  label: t.label ?? "",
+}));
+---
+
+{enabled && (
+  <section class="mt-8 space-y-6" aria-label="Additional order confirmation details">
+    {cmsBlock && (
+      <div
+        class="prose prose-sm max-w-none rounded-lg border border-[var(--color-border,theme(colors.gray.200))] bg-white p-4"
+        set:html={cmsBlock}
+      />
+    )}
+
+    {social?.enabled && shareUrl && (
+      <div class="rounded-lg border border-[var(--color-border,theme(colors.gray.200))] bg-white p-4">
+        <h2 class="text-sm font-semibold text-[var(--color-fg,theme(colors.gray.900))] mb-2">
+          {sanitizeHtml(social.title ?? "Share the love")}
+        </h2>
+        <ul class="flex flex-wrap gap-2">
+          {social.facebook && (
+            <li>
+              <a
+                class="inline-flex items-center rounded-md bg-[var(--color-brand,theme(colors.emerald.600))] px-3 py-1.5 text-sm text-white"
+                href={`https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`}
+                rel="nofollow noopener"
+                target="_blank"
+              >Facebook</a>
+            </li>
+          )}
+          {social.twitter && (
+            <li>
+              <a
+                class="inline-flex items-center rounded-md bg-[var(--color-brand,theme(colors.emerald.600))] px-3 py-1.5 text-sm text-white"
+                href={`https://twitter.com/intent/tweet?url=${encodedUrl}&text=${encodedTitle}`}
+                rel="nofollow noopener"
+                target="_blank"
+              >X / Twitter</a>
+            </li>
+          )}
+          {social.whatsapp && (
+            <li>
+              <a
+                class="inline-flex items-center rounded-md bg-[var(--color-brand,theme(colors.emerald.600))] px-3 py-1.5 text-sm text-white"
+                href={`https://wa.me/?text=${encodedTitle}%20${encodedUrl}`}
+                rel="nofollow noopener"
+                target="_blank"
+              >WhatsApp</a>
+            </li>
+          )}
+          {social.email && (
+            <li>
+              <a
+                class="inline-flex items-center rounded-md bg-[var(--color-brand,theme(colors.emerald.600))] px-3 py-1.5 text-sm text-white"
+                href={`mailto:?subject=${encodedTitle}&body=${encodedUrl}`}
+              >Email</a>
+            </li>
+          )}
+        </ul>
+      </div>
+    )}
+
+    {suggested.length > 0 && (
+      <div class="rounded-lg border border-[var(--color-border,theme(colors.gray.200))] bg-white p-4">
+        <h2 class="text-sm font-semibold text-[var(--color-fg,theme(colors.gray.900))] mb-3">
+          You might also like
+        </h2>
+        <ul class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {suggested.map((p) => {
+            const href = suggestedProductUrl(p);
+            const img = p.image?.url ?? null;
+            return (
+              <li class="rounded border border-[var(--color-border,theme(colors.gray.100))] p-2">
+                {href ? (
+                  <a href={href} class="block">
+                    {img && (
+                      <img
+                        src={img}
+                        alt={p.image?.label ?? p.name ?? "Suggested product"}
+                        width="240"
+                        height="240"
+                        loading="lazy"
+                        class="w-full h-auto rounded"
+                      />
+                    )}
+                    <p class="mt-2 text-xs font-medium text-[var(--color-fg,theme(colors.gray.800))] line-clamp-2">
+                      {sanitizeHtml(p.name ?? "")}
+                    </p>
+                    {p.price?.value != null && (
+                      <p class="text-xs text-[var(--color-fg-muted,theme(colors.gray.600))]">
+                        {formatMoney(p.price.value, p.price.currency ?? "USD")}
+                      </p>
+                    )}
+                  </a>
+                ) : (
+                  <p class="text-xs">{sanitizeHtml(p.name ?? "")}</p>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    )}
+
+    {/*
+      Tracking-script placeholder — this block DELIBERATELY renders no
+      executable JavaScript. The script tag below writes a read-only
+      inventory to `window.__panthTracking` that your consent-aware
+      analytics layer can inspect and act upon.
+    */}
+    {trackingPayload.length > 0 && (
+      <script
+        type="application/json"
+        data-panth-tracking-inventory
+        set:html={JSON.stringify(trackingPayload)}
+      />
+    )}
+  </section>
+)}
+
+<script>
+  // Expose the tracking inventory (code + label only, never the raw HTML)
+  // so a first-party analytics bootstrap can consume it alongside the
+  // user's consent state.
+  (function () {
+    const tpl = document.querySelector<HTMLScriptElement>(
+      "script[data-panth-tracking-inventory]",
+    );
+    if (!tpl) return;
+    try {
+      const raw = tpl.textContent ?? "[]";
+      const parsed: { code: string; label: string }[] = JSON.parse(raw);
+      (window as unknown as { __panthTracking?: unknown }).__panthTracking = parsed;
+    } catch {
+      // ignore — never block the success page on tracking metadata.
+    }
+  })();
+</script>

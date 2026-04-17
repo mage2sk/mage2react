@@ -1,0 +1,17 @@
+{
+    "name": "panth/module-theme-customizer-react",
+    "description": "React/Astro storefront adapter for Panth Theme Customizer",
+    "type": "magento2-module",
+    "license": "proprietary",
+    "authors": [{ "name": "Kishan Savaliya", "email": "kishansavaliyakb@gmail.com" }],
+    "require": {
+        "php": ">=8.1",
+        "magento/framework": "*",
+        "panth/module-theme-customizer": "*",
+        "panth/module-react": "*"
+    },
+    "autoload": {
+        "files": [ "registration.php" ],
+        "psr-4": { "Panth\\ThemeCustomizerReact\\": "" }
+    }
+}

@@ -1,0 +1,100 @@
+---
+/**
+ * OrderAttachmentsList.astro
+ *
+ * Panth_OrderAttachmentsReact — SSR-rendered list of downloadable attachments
+ * for a single order. Emits nothing when the parent `Panth_OrderAttachments`
+ * module is disabled or its schema is unavailable (safeParse falls through
+ * to `[]`) and there are also no attachments.
+ *
+ * INTEGRATION (leave as a doc-comment in the order-view page; never auto-wire):
+ *
+ *   ---
+ *   import OrderAttachmentsList from
+ *     "~/components/panth/order-attachments/OrderAttachmentsList.astro";
+ *   import UploadAttachment from
+ *     "~/components/panth/order-attachments/UploadAttachment.tsx";
+ *   ---
+ *   <OrderAttachmentsList orderNumber={orderNumber} token={token} />
+ *   <UploadAttachment client:visible orderNumber={orderNumber} />
+ *
+ * Any Magento-authored strings (filename, URL) are passed as text nodes — no
+ * `set:html` — so Astro auto-escapes them. Filenames additionally go through
+ * `sanitizeFilename()` to defuse path-separator and control-character abuse.
+ */
+import {
+  getOrderAttachments,
+  formatAttachmentSize,
+  sanitizeFilename,
+} from "~/lib/queries-order-attachments";
+
+interface Props {
+  orderNumber: string;
+  token: string;
+}
+
+const { orderNumber, token } = Astro.props as Props;
+
+const attachments = orderNumber && token
+  ? await getOrderAttachments(orderNumber, token)
+  : [];
+
+// Keep only attachments with a usable download URL. Everything else is
+// either malformed schema output or a stub row — either way, nothing we
+// can render as a link.
+const rows = attachments.filter((a) => typeof a.url === "string" && a.url.length > 0);
+
+function formatDate(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+---
+
+{rows.length > 0 && (
+  <section
+    class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 mt-6"
+    aria-label="Order attachments"
+  >
+    <h2 class="text-base font-semibold text-[var(--color-fg)] mb-3 flex items-center gap-2">
+      <i class="bi bi-paperclip" aria-hidden="true"></i>
+      <span>Attachments</span>
+    </h2>
+    <ul class="divide-y divide-[var(--color-border)]">
+      {rows.map((a) => {
+        const filename = sanitizeFilename(a.filename);
+        const size = formatAttachmentSize(a.size);
+        const uploaded = formatDate(a.uploaded_at);
+        const href = a.url as string;
+        return (
+          <li class="flex items-center justify-between gap-3 py-2">
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-sm font-medium text-[var(--color-fg)]">
+                {filename}
+              </p>
+              <p class="text-xs text-[var(--color-fg-muted)]">
+                {[size, uploaded].filter(Boolean).join(" \u00B7 ")}
+              </p>
+            </div>
+            <a
+              href={href}
+              rel="noopener noreferrer"
+              target="_blank"
+              data-astro-reload
+              class="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-brand)] px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+              aria-label={`Download ${filename}`}
+            >
+              <i class="bi bi-download" aria-hidden="true"></i>
+              <span>Download</span>
+            </a>
+          </li>
+        );
+      })}
+    </ul>
+  </section>
+)}

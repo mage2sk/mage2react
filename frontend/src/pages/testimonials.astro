@@ -1,0 +1,215 @@
+---
+/**
+ * /testimonials — SSR customer testimonials grid.
+ *
+ * Pagination: `?page=<n>` (1-indexed, clamped to >= 1).
+ * Data source: `Panth_Testimonials` via `panthTestimonials` GraphQL.
+ * Safe: returns an empty grid with a friendly empty-state on any error.
+ */
+import Layout from "~/layouts/Base.astro";
+import { getTestimonials } from "~/lib/queries-testimonials";
+import { sanitizeHtml } from "~/lib/sanitize";
+
+export const prerender = false;
+
+const PAGE_SIZE = 12;
+
+const rawPage = Astro.url.searchParams.get("page");
+const parsedPage = rawPage ? Number.parseInt(rawPage, 10) : 1;
+const currentPage = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
+
+const { items, totalPages } = await getTestimonials(PAGE_SIZE, currentPage);
+
+const hasItems = items.length > 0;
+const hasPrev = currentPage > 1;
+const hasNext = currentPage < totalPages;
+
+function clampRating(v: number | null | undefined): number {
+  if (typeof v !== "number" || !Number.isFinite(v)) return 0;
+  return Math.max(0, Math.min(5, Math.round(v)));
+}
+
+function cleanPlain(v: string | null | undefined): string {
+  if (!v) return "";
+  return sanitizeHtml(v).replace(/<[^>]*>/g, "").trim();
+}
+
+function cleanRichBody(v: string | null | undefined): string {
+  if (!v) return "";
+  return sanitizeHtml(v);
+}
+
+function formatDate(v: string | null | undefined): string | null {
+  if (!v) return null;
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+function buildHref(page: number): string {
+  const params = new URLSearchParams(Astro.url.searchParams);
+  if (page <= 1) params.delete("page");
+  else params.set("page", String(page));
+  const qs = params.toString();
+  return qs ? `/testimonials?${qs}` : "/testimonials";
+}
+
+const prevHref = hasPrev ? buildHref(currentPage - 1) : null;
+const nextHref = hasNext ? buildHref(currentPage + 1) : null;
+
+const description = "Read what our customers are saying about us.";
+---
+<Layout
+  title="Customer Testimonials"
+  description={description}
+  prev={prevHref ?? undefined}
+  next={nextHref ?? undefined}
+>
+  <div class="mx-auto max-w-6xl">
+    <header class="mb-8">
+      <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Customer Testimonials</h1>
+      <p class="mt-2 max-w-2xl text-sm text-zinc-600">{description}</p>
+    </header>
+
+    {!hasItems && (
+      <div class="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-12 text-center">
+        <p class="text-sm text-zinc-600">
+          No testimonials yet. Check back soon.
+        </p>
+      </div>
+    )}
+
+    {hasItems && (
+      <ul class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        {items.map((t) => {
+          const name = cleanPlain(t.customer_name) || "Anonymous";
+          const title = cleanPlain(t.title);
+          const body = cleanRichBody(t.body);
+          const rating = clampRating(t.rating);
+          const photo = typeof t.photo === "string" && t.photo.trim().length ? t.photo : null;
+          const date = formatDate(t.created_at);
+          const ratingLabel = `${rating} out of 5 stars`;
+          return (
+            <li class="flex h-full flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+              <div class="flex items-center gap-3">
+                {photo ? (
+                  <img
+                    src={photo}
+                    alt={`${name} profile photo`}
+                    width="48"
+                    height="48"
+                    loading="lazy"
+                    decoding="async"
+                    class="size-12 rounded-full object-cover"
+                  />
+                ) : (
+                  <span
+                    class="grid size-12 place-items-center rounded-full bg-zinc-100 text-zinc-500"
+                    aria-hidden="true"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      class="size-6"
+                    >
+                      <path d="M20 21a8 8 0 0 0-16 0" />
+                      <circle cx="12" cy="7" r="4" />
+                    </svg>
+                  </span>
+                )}
+                <div class="flex flex-col">
+                  <p class="text-sm font-semibold text-zinc-900">{name}</p>
+                  {date && <p class="text-xs text-zinc-500">{date}</p>}
+                </div>
+              </div>
+
+              <div class="flex items-center gap-0.5" aria-label={ratingLabel} role="img">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill={i < rating ? "currentColor" : "none"}
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linejoin="round"
+                    class={i < rating ? "size-4 text-amber-500" : "size-4 text-zinc-300"}
+                    aria-hidden="true"
+                  >
+                    <path d="M12 2.5l2.92 5.92 6.54.95-4.73 4.61 1.12 6.52L12 17.77l-5.85 3.07 1.12-6.52L2.54 9.37l6.54-.95L12 2.5z" />
+                  </svg>
+                ))}
+              </div>
+
+              {title && (
+                <h2 class="text-base font-semibold text-zinc-900">{title}</h2>
+              )}
+              {body && (
+                <div
+                  class="prose prose-sm max-w-none text-zinc-700"
+                  set:html={body}
+                />
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    )}
+
+    {totalPages > 1 && (
+      <nav class="mt-10 flex items-center justify-between" aria-label="Testimonials pagination">
+        {prevHref ? (
+          <a
+            href={prevHref}
+            class="inline-flex items-center gap-1 rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
+            rel="prev"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="size-4"
+              aria-hidden="true"
+            >
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+            Previous
+          </a>
+        ) : <span />}
+        <p class="text-xs text-zinc-500">
+          Page {currentPage} of {totalPages}
+        </p>
+        {nextHref ? (
+          <a
+            href={nextHref}
+            class="inline-flex items-center gap-1 rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
+            rel="next"
+          >
+            Next
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="size-4"
+              aria-hidden="true"
+            >
+              <path d="m9 18 6-6-6-6" />
+            </svg>
+          </a>
+        ) : <span />}
+      </nav>
+    )}
+  </div>
+</Layout>

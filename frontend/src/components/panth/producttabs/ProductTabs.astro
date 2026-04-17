@@ -1,0 +1,184 @@
+---
+/**
+ * <ProductTabs /> — server-rendered PDP tabs powered by `Panth_Producttabs`.
+ *
+ * Renders nothing when no tabs and no `reviews` slot are provided — safe to
+ * ship before the parent module is installed.
+ *
+ * Rendering strategy:
+ *   - Mobile (< md): native `<details>` accordions, zero JS. The first tab
+ *     opens by default.
+ *   - Desktop (>= md): tablist + panels. Active state driven by radio inputs
+ *     so a click selects the tab with zero JS. Arrow-key navigation is added
+ *     by the tiny `TabsKeyboardNav` island (`client:idle`).
+ *
+ * Reviews slot: if a `reviews` slot is provided, a pre-declared "Reviews" tab
+ * is appended (always last unless an admin-defined tab already has id="reviews",
+ * in which case the slot replaces that tab's content).
+ */
+import { sanitizeHtml } from "~/lib/sanitize";
+import type { PanthTabT } from "~/lib/queries-producttabs";
+import TabsKeyboardNav from "./TabsKeyboardNav.tsx";
+
+interface Props {
+  tabs: PanthTabT[];
+  reviewsLabel?: string;
+}
+
+const { tabs, reviewsLabel = "Reviews" } = Astro.props;
+const hasReviewsSlot = Astro.slots.has("reviews");
+
+// Merge in the reviews tab when the slot is provided. If the admin already
+// created a tab with id "reviews", we replace its content with the slot.
+type RenderTab = { id: string; title: string; contentHtml: string | null; isSlot: boolean };
+
+const adminTabs: RenderTab[] = tabs.map((t) => ({
+  id: t.id,
+  title: t.title,
+  contentHtml: sanitizeHtml(t.content ?? ""),
+  isSlot: false,
+}));
+
+let renderTabs: RenderTab[];
+if (hasReviewsSlot) {
+  const existingIdx = adminTabs.findIndex((t) => t.id === "reviews");
+  const reviewsTab: RenderTab = {
+    id: "reviews",
+    title: reviewsLabel,
+    contentHtml: null,
+    isSlot: true,
+  };
+  if (existingIdx >= 0) {
+    renderTabs = adminTabs.slice();
+    renderTabs[existingIdx] = { ...reviewsTab, title: adminTabs[existingIdx]!.title };
+  } else {
+    renderTabs = [...adminTabs, reviewsTab];
+  }
+} else {
+  renderTabs = adminTabs;
+}
+
+const hasContent = renderTabs.length > 0;
+
+// Deterministic ids (no Math.random / Date.now)
+const groupName = "panth-tabs";
+const containerId = "panth-producttabs";
+---
+
+{hasContent && (
+  <section class="panth-producttabs mx-auto max-w-5xl px-0 py-8" id={containerId}>
+    {/* Radio inputs drive the active tab on desktop. Visually hidden. */}
+    {renderTabs.map((tab, i) => (
+      <input
+        type="radio"
+        name={groupName}
+        id={`${containerId}-input-${tab.id}`}
+        class="panth-tab-radio sr-only"
+        checked={i === 0}
+      />
+    ))}
+
+    {/* Desktop tablist */}
+    <div
+      role="tablist"
+      aria-label="Product details"
+      class="panth-tablist hidden border-b border-zinc-200 md:flex md:flex-wrap md:gap-1"
+    >
+      {renderTabs.map((tab, i) => (
+        <label
+          for={`${containerId}-input-${tab.id}`}
+          role="tab"
+          tabindex={i === 0 ? 0 : -1}
+          id={`${containerId}-tab-${tab.id}`}
+          aria-controls={`${containerId}-panel-${tab.id}`}
+          aria-selected={i === 0 ? "true" : "false"}
+          data-tab-id={tab.id}
+          class="panth-tab-trigger cursor-pointer select-none border-b-2 border-transparent px-4 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
+        >
+          {tab.title}
+        </label>
+      ))}
+    </div>
+
+    {/* Desktop panels */}
+    <div class="panth-panels hidden md:block">
+      {renderTabs.map((tab) => (
+        <section
+          role="tabpanel"
+          id={`${containerId}-panel-${tab.id}`}
+          aria-labelledby={`${containerId}-tab-${tab.id}`}
+          class="panth-tab-panel hidden pt-4"
+          data-panel-id={tab.id}
+        >
+          {tab.isSlot ? (
+            <slot name="reviews" />
+          ) : (
+            tab.contentHtml && (
+              <div class="prose prose-sm max-w-none" set:html={tab.contentHtml} />
+            )
+          )}
+        </section>
+      ))}
+    </div>
+
+    {/* Mobile accordion */}
+    <div class="md:hidden">
+      {renderTabs.map((tab, i) => (
+        <details class="group border-b border-zinc-200" open={i === 0}>
+          <summary class="flex cursor-pointer list-none items-center justify-between py-3 text-sm font-medium text-zinc-900">
+            <span>{tab.title}</span>
+            <svg
+              class="size-4 transition-transform group-open:rotate-180"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              aria-hidden="true"
+            >
+              <path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </summary>
+          <div class="pb-4">
+            {tab.isSlot ? (
+              <slot name="reviews" />
+            ) : (
+              tab.contentHtml && (
+                <div class="prose prose-sm max-w-none" set:html={tab.contentHtml} />
+              )
+            )}
+          </div>
+        </details>
+      ))}
+    </div>
+
+    <TabsKeyboardNav client:idle containerId={containerId} />
+  </section>
+)}
+
+<style>
+  .panth-producttabs .panth-tab-panel { display: none; }
+  /* Show the panel whose matching radio is checked */
+  .panth-producttabs .panth-tab-radio:nth-of-type(1):checked ~ .panth-panels .panth-tab-panel:nth-of-type(1),
+  .panth-producttabs .panth-tab-radio:nth-of-type(2):checked ~ .panth-panels .panth-tab-panel:nth-of-type(2),
+  .panth-producttabs .panth-tab-radio:nth-of-type(3):checked ~ .panth-panels .panth-tab-panel:nth-of-type(3),
+  .panth-producttabs .panth-tab-radio:nth-of-type(4):checked ~ .panth-panels .panth-tab-panel:nth-of-type(4),
+  .panth-producttabs .panth-tab-radio:nth-of-type(5):checked ~ .panth-panels .panth-tab-panel:nth-of-type(5),
+  .panth-producttabs .panth-tab-radio:nth-of-type(6):checked ~ .panth-panels .panth-tab-panel:nth-of-type(6),
+  .panth-producttabs .panth-tab-radio:nth-of-type(7):checked ~ .panth-panels .panth-tab-panel:nth-of-type(7),
+  .panth-producttabs .panth-tab-radio:nth-of-type(8):checked ~ .panth-panels .panth-tab-panel:nth-of-type(8) {
+    display: block;
+  }
+
+  /* Active tab trigger styling */
+  .panth-producttabs .panth-tab-radio:nth-of-type(1):checked ~ .panth-tablist .panth-tab-trigger:nth-of-type(1),
+  .panth-producttabs .panth-tab-radio:nth-of-type(2):checked ~ .panth-tablist .panth-tab-trigger:nth-of-type(2),
+  .panth-producttabs .panth-tab-radio:nth-of-type(3):checked ~ .panth-tablist .panth-tab-trigger:nth-of-type(3),
+  .panth-producttabs .panth-tab-radio:nth-of-type(4):checked ~ .panth-tablist .panth-tab-trigger:nth-of-type(4),
+  .panth-producttabs .panth-tab-radio:nth-of-type(5):checked ~ .panth-tablist .panth-tab-trigger:nth-of-type(5),
+  .panth-producttabs .panth-tab-radio:nth-of-type(6):checked ~ .panth-tablist .panth-tab-trigger:nth-of-type(6),
+  .panth-producttabs .panth-tab-radio:nth-of-type(7):checked ~ .panth-tablist .panth-tab-trigger:nth-of-type(7),
+  .panth-producttabs .panth-tab-radio:nth-of-type(8):checked ~ .panth-tablist .panth-tab-trigger:nth-of-type(8) {
+    border-bottom-color: var(--color-brand);
+    color: rgb(24, 24, 27);
+  }
+</style>

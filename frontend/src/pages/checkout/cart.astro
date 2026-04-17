@@ -5,8 +5,10 @@ import CartSummary from "~/components/cart/CartSummary.tsx";
 import {
   CART_COOKIE_NAME,
   getCart,
+  getCustomerCartId,
   type CartT,
 } from "~/lib/queries-cart";
+import { getCustomerToken } from "~/lib/auth";
 
 /**
  * /checkout/cart — Luma-style full cart page.
@@ -22,13 +24,34 @@ import {
  */
 export const prerender = false;
 
-const cartId = Astro.cookies.get(CART_COOKIE_NAME)?.value ?? null;
+const token = getCustomerToken(Astro);
+let cartId = Astro.cookies.get(CART_COOKIE_NAME)?.value ?? null;
+
+// Logged-in customers: always resolve the customer cart id directly from
+// Magento and overwrite the cookie. This eliminates the SSR / client hydration
+// mismatch where the page would render with the old guest-cart snapshot while
+// the client fetched the real customer cart.
+if (token) {
+  try {
+    const customerCartId = await getCustomerCartId(token);
+    if (customerCartId) {
+      cartId = customerCartId;
+      Astro.cookies.set(CART_COOKIE_NAME, customerCartId, {
+        httpOnly: false,
+        secure: true,
+        sameSite: "lax",
+        maxAge: 60 * 60 * 24 * 365,
+        path: "/",
+      });
+    }
+  } catch { /* non-fatal */ }
+}
 
 let cartData: CartT | null = null;
 let fetchFailed = false;
 if (cartId) {
   try {
-    cartData = await getCart(cartId);
+    cartData = await getCart(cartId, token);
   } catch {
     fetchFailed = true;
   }

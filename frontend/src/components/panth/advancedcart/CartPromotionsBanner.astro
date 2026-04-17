@@ -1,0 +1,170 @@
+---
+/**
+ * CartPromotionsBanner.astro
+ *
+ * Panth_AdvancedcartReact — SSR-rendered summary of applied promotions,
+ * coupons, savings total, trust badges, and estimated delivery window.
+ * Emits nothing when the parent `Panth_AdvancedCart` module is disabled
+ * or its schema is unavailable (safeParse fails).
+ *
+ * INTEGRATION (leave as comments; never auto-wire):
+ *   1. In `frontend/src/pages/checkout/cart.astro`, after fetching the cart
+ *      id, import and render ABOVE `<CartSummary />`:
+ *
+ *        ---
+ *        import CartPromotionsBanner from
+ *          "~/components/panth/advancedcart/CartPromotionsBanner.astro";
+ *        ---
+ *        <CartPromotionsBanner cartId={cartId} subtotal={subtotal.value} />
+ *
+ *   2. Or compose into a project-specific cart template — do NOT edit the
+ *      shipped `cart.astro` from this module.
+ *
+ * Any Magento-authored HTML (promotion labels / trust-badge titles) must be
+ * passed through `sanitizeHtml()` before injection. This component renders
+ * text nodes only — no `set:html` — so strings are auto-escaped by Astro.
+ */
+import { getAdvancedCart, computeFreeShippingProgress } from "~/lib/queries-advancedcart";
+import { formatMoney } from "~/lib/money";
+import { sanitizeHtml } from "~/lib/sanitize";
+
+interface Props {
+  cartId: string;
+  /** Major-units cart subtotal. Falls through to the server-side remaining when absent. */
+  subtotal?: number | null;
+}
+
+const { cartId, subtotal } = Astro.props as Props;
+
+const data = cartId ? await getAdvancedCart(cartId) : null;
+
+// If the schema is missing, render nothing.
+const enabled = data != null;
+
+const trustBadges = data?.trust_badges ?? [];
+const promos = data?.applied_promotions ?? [];
+const savings = data?.savings_total;
+const freeShipping = (() => {
+  if (!data?.free_shipping_enabled) return null;
+  const threshold = data.free_shipping_threshold ?? 0;
+  if (threshold <= 0) return null;
+  if (typeof subtotal === "number") {
+    const computed = computeFreeShippingProgress(subtotal, threshold);
+    return {
+      ratio: computed.ratio,
+      remaining: computed.remaining,
+      achieved: computed.achieved,
+      currency: data.free_shipping_currency ?? "USD",
+      messageProgress: data.message_progress ?? "",
+      messageAchieved: data.message_achieved ?? "",
+    };
+  }
+  const remaining = data.free_shipping_remaining ?? 0;
+  const achieved = Boolean(data.free_shipping_achieved);
+  const ratio = achieved ? 1 : Math.max(0, Math.min(1, 1 - remaining / threshold));
+  return {
+    ratio,
+    remaining,
+    achieved,
+    currency: data.free_shipping_currency ?? "USD",
+    messageProgress: data.message_progress ?? "",
+    messageAchieved: data.message_achieved ?? "",
+  };
+})();
+
+const delivery = data?.estimated_delivery ?? null;
+
+// Resolve the free-shipping copy. The parent module supports `{remaining}`
+// placeholder tokens in the configured message. We substitute using the
+// sanitised, locale-formatted amount.
+function resolveShippingMessage(): string {
+  if (!freeShipping) return "";
+  if (freeShipping.achieved) {
+    return sanitizeHtml(freeShipping.messageAchieved || "You've earned free shipping!");
+  }
+  const remainingStr = formatMoney(freeShipping.remaining, freeShipping.currency);
+  const raw = (freeShipping.messageProgress || "You're {remaining} away from free shipping!")
+    .replace(/\{\{?\s*remaining\s*\}?\}/gi, remainingStr);
+  return sanitizeHtml(raw);
+}
+
+const shippingMessage = resolveShippingMessage();
+---
+
+{enabled && (
+  <section
+    class="rounded-lg border border-[var(--color-border,theme(colors.gray.200))] bg-white p-4 mb-4"
+    aria-label="Cart promotions and benefits"
+  >
+    {freeShipping && (
+      <div class="mb-3">
+        <p class="text-sm font-medium text-[var(--color-brand,theme(colors.emerald.700))]">
+          {shippingMessage}
+        </p>
+        <div
+          class="mt-2 h-2 w-full rounded-full bg-[var(--color-muted,theme(colors.gray.100))] overflow-hidden"
+          role="progressbar"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow={Math.round(freeShipping.ratio * 100)}
+        >
+          <div
+            class="h-full bg-[var(--color-brand,theme(colors.emerald.600))] transition-[width] duration-300"
+            style={`width: ${Math.round(freeShipping.ratio * 100)}%`}
+          />
+        </div>
+      </div>
+    )}
+
+    {promos.length > 0 && (
+      <ul class="text-sm text-[var(--color-fg,theme(colors.gray.800))] space-y-1 mb-3">
+        {promos.map((p) => (
+          <li class="flex justify-between gap-2">
+            <span>{p.label ?? p.code ?? "Promotion"}</span>
+            {p.amount?.value != null && (
+              <span class="font-medium">
+                -{formatMoney(p.amount.value, p.amount.currency ?? "USD")}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    )}
+
+    {savings?.value != null && savings.value > 0 && (
+      <p class="text-sm font-medium text-[var(--color-brand,theme(colors.emerald.700))] mb-3">
+        You're saving {formatMoney(savings.value, savings.currency ?? "USD")} on this order.
+      </p>
+    )}
+
+    {delivery && (delivery.label || delivery.earliest_date || delivery.min_days != null) && (
+      <p class="text-sm text-[var(--color-fg-muted,theme(colors.gray.600))] mb-3">
+        <strong class="font-medium">{delivery.label ?? "Estimated Delivery"}:</strong>{" "}
+        {delivery.earliest_date && delivery.latest_date
+          ? `${delivery.earliest_date} – ${delivery.latest_date}`
+          : delivery.min_days != null && delivery.max_days != null
+            ? `${delivery.min_days}–${delivery.max_days} business days`
+            : ""}
+      </p>
+    )}
+
+    {trustBadges.length > 0 && (
+      <ul class="flex flex-wrap gap-3 items-center text-xs text-[var(--color-fg-muted,theme(colors.gray.600))]">
+        {trustBadges.map((b) => (
+          <li class="flex items-center gap-1.5">
+            {b.icon && (
+              <img
+                src={b.icon}
+                alt={b.label ?? b.code ?? "Trust badge"}
+                width="20"
+                height="20"
+                loading="lazy"
+              />
+            )}
+            <span>{b.label ?? b.code ?? ""}</span>
+          </li>
+        ))}
+      </ul>
+    )}
+  </section>
+)}

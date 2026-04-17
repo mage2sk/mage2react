@@ -3,7 +3,7 @@ import Layout from "~/layouts/Base.astro";
 import StepIndicator from "~/components/checkout/StepIndicator.astro";
 import OrderSummary from "~/components/checkout/OrderSummary.astro";
 import AddressForm from "~/components/checkout/AddressForm.astro";
-import { CART_COOKIE_NAME } from "~/lib/queries-cart";
+import { CART_COOKIE_NAME, getCustomerCartId } from "~/lib/queries-cart";
 import { getCustomerToken } from "~/lib/auth";
 import { getCustomer, type CustomerT, type CustomerAddressT } from "~/lib/queries-customer";
 import {
@@ -38,12 +38,43 @@ import { z } from "zod";
  */
 export const prerender = false;
 
-const cartId = Astro.cookies.get(CART_COOKIE_NAME)?.value ?? null;
+let cartId = Astro.cookies.get(CART_COOKIE_NAME)?.value ?? null;
+const token = getCustomerToken(Astro);
+
+// Logged-in customers should use their Magento customer cart, not the guest
+// cart id cookie. Magento merges guest carts server-side on login, so the
+// guest cookie id may no longer be valid. Prefer `customerCart.id` when a
+// token is present.
+if (token) {
+  const custCartId = await getCustomerCartId(token);
+  if (custCartId) {
+    cartId = custCartId;
+    // Persist for subsequent mutations.
+    Astro.cookies.set(CART_COOKIE_NAME, custCartId, {
+      httpOnly: false,
+      secure: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 365,
+    });
+  }
+}
+
 if (!cartId) {
   return Astro.redirect("/checkout/cart", 303);
 }
 
-const token = getCustomerToken(Astro);
+// Virtual-only carts (downloadable / gift-card / service products) have no
+// shippable items. Magento rejects `setShippingAddressesOnCart` for these,
+// so we skip straight to payment.
+try {
+  const cartSnapshot = await getCartForCheckout(cartId, token);
+  if (cartSnapshot?.is_virtual) {
+    return Astro.redirect("/checkout/payment", 303);
+  }
+} catch {
+  // Non-fatal — we'll render the form and surface any real error inline.
+}
 
 // Snapshot of customer data (saved addresses, email).
 let customer: CustomerT | null = null;
@@ -180,10 +211,12 @@ if (Astro.request.method === "POST") {
         }
       }
     } else if (action === "save-address") {
-      // Guests must send an email first. If Magento reports the email is
-      // already tied to a customer account we treat it as INFORMATIONAL —
-      // Magento core supports guest checkout with any email by default
-      // (admin toggle: Sales → Checkout → Allow Guest Checkout).
+      // Guest email is optional at this step — we only block on Zod format
+      // errors. Magento's `setGuestEmailOnCart` can legitimately reject when
+      // the email matches an existing customer; per Magento's own behaviour
+      // (`Allow Guest Checkout = Yes`) we should still accept the order. We
+      // try the mutation as a best-effort and swallow its server-side
+      // errors; placeOrder will do its own validation at the final step.
       let emailOk = true;
       if (!token) {
         const emailRaw = String(form.get("email") ?? "").trim();
@@ -193,22 +226,12 @@ if (Astro.request.method === "POST") {
           emailOk = false;
         } else {
           try {
-            const emailResult = await setGuestEmailOnCart(cartId, parsedEmail.data);
-            if (emailResult.userErrors.length > 0) {
-              const msg = (emailResult.userErrors[0]?.message ?? "").toLowerCase();
-              // Allow guest checkout with a known-account email — Magento's
-              // default behaviour.
-              if (!msg.includes("already") && !msg.includes("assigned")) {
-                emailError = emailResult.userErrors[0]?.message ?? null;
-                emailOk = false;
-              }
-            }
+            await setGuestEmailOnCart(cartId, parsedEmail.data);
           } catch (err) {
-            const raw = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
-            if (!raw.includes("already") && !raw.includes("assigned")) {
-              emailError = friendlyCheckoutError(err);
-              emailOk = false;
-            }
+            // Log but NEVER block. Magento may complain that the email is
+            // tied to an account; that's allowed under standard guest-
+            // checkout settings.
+            console.warn("[checkout:shipping] setGuestEmailOnCart soft-fail:", err);
           }
         }
         formValues.email = emailRaw;

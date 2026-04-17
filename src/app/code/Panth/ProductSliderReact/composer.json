@@ -1,0 +1,17 @@
+{
+    "name": "panth/module-product-slider-react",
+    "description": "React/Astro storefront adapter for Panth ProductSlider",
+    "type": "magento2-module",
+    "license": "proprietary",
+    "authors": [{ "name": "Kishan Savaliya", "email": "kishansavaliyakb@gmail.com" }],
+    "require": {
+        "php": ">=8.1",
+        "magento/framework": "*",
+        "mage2kishan/module-product-slider": "*",
+        "panth/module-react": "*"
+    },
+    "autoload": {
+        "files": [ "registration.php" ],
+        "psr-4": { "Panth\\ProductSliderReact\\": "" }
+    }
+}

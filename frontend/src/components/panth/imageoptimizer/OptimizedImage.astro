@@ -1,0 +1,108 @@
+---
+/**
+ * <OptimizedImage /> — drop-in `<picture>` wrapper backed by `Panth_Imageoptimizer`.
+ *
+ * Emits AVIF → WebP → raw (JPEG/PNG) `<source>` tags with responsive `srcset`
+ * and a resolved `<img>` fallback. Enforces `width`, `height`, `alt`, and
+ * `loading` on every image. Falls back to a plain `<img>` without `<picture>`
+ * wrapping when:
+ *   - the source is absolute off-site (e.g. a third-party CDN), OR
+ *   - no width is provided (cannot build a sensible srcset).
+ *
+ * The optimizer URL pattern is best-effort — see `lib/panth-image.ts`.
+ */
+import {
+  panthImageUrl,
+  panthResponsiveSrcset,
+  isPanthOptimizerUrl,
+} from "~/lib/panth-image";
+
+interface Props {
+  src: string;
+  alt: string;
+  width: number;
+  height: number;
+  sizes?: string;
+  loading?: "eager" | "lazy";
+  decoding?: "async" | "sync" | "auto";
+  fetchpriority?: "high" | "low" | "auto";
+  /** Extra widths for srcset. Defaults to a sensible set derived from `width`. */
+  widths?: number[];
+  /** Forwarded to the <img> tag. */
+  class?: string;
+}
+
+const {
+  src,
+  alt,
+  width,
+  height,
+  sizes,
+  loading = "lazy",
+  decoding = "async",
+  fetchpriority,
+  widths,
+  class: className,
+} = Astro.props;
+
+const isOffsite = /^https?:\/\//i.test(src);
+const canOptimize = !!src && !isOffsite && !isPanthOptimizerUrl(src);
+
+const fallbackWidths =
+  widths ??
+  [0.5, 1, 1.5, 2]
+    .map((m) => Math.round(width * m))
+    .filter((v, i, a) => v > 0 && a.indexOf(v) === i);
+
+const avifSrcset = canOptimize
+  ? panthResponsiveSrcset(src, fallbackWidths, { format: "avif" })
+  : "";
+const webpSrcset = canOptimize
+  ? panthResponsiveSrcset(src, fallbackWidths, { format: "webp" })
+  : "";
+const jpegSrcset = canOptimize
+  ? panthResponsiveSrcset(src, fallbackWidths, { format: "jpeg" })
+  : "";
+
+// Resolved <img> src: the largest rendition (1x), or raw url off-site.
+const imgSrc = canOptimize ? panthImageUrl(src, { width, height, format: "auto" }) : src;
+
+// When we can't optimize, emit a plain <img> — no <picture> wrapping.
+const fallbackOnly = !canOptimize;
+---
+{fallbackOnly ? (
+  <img
+    src={imgSrc}
+    alt={alt}
+    width={width}
+    height={height}
+    loading={loading}
+    decoding={decoding}
+    fetchpriority={fetchpriority}
+    class={className}
+  />
+) : (
+  <picture>
+    {avifSrcset && (
+      <source type="image/avif" srcset={avifSrcset} sizes={sizes} />
+    )}
+    {webpSrcset && (
+      <source type="image/webp" srcset={webpSrcset} sizes={sizes} />
+    )}
+    {jpegSrcset && (
+      <source type="image/jpeg" srcset={jpegSrcset} sizes={sizes} />
+    )}
+    <img
+      src={imgSrc}
+      srcset={jpegSrcset || undefined}
+      sizes={sizes}
+      alt={alt}
+      width={width}
+      height={height}
+      loading={loading}
+      decoding={decoding}
+      fetchpriority={fetchpriority}
+      class={className}
+    />
+  </picture>
+)}

@@ -1,0 +1,107 @@
+---
+/**
+ * <BannerSliderStatic /> — zero-JS SSR fallback for `Panth_BannerSlider`.
+ *
+ * Renders the admin-configured slides as a horizontal CSS `scroll-snap-x`
+ * strip. Crawlable, usable without JavaScript, and safe to mount alongside
+ * the React `<BannerSlider client:idle />` island (the island replaces
+ * this fragment's markup once hydrated if both are used together, or you
+ * can render just one).
+ *
+ * Renders nothing when there are zero slides or the parent module is absent.
+ */
+import { getBannerSlider } from "~/lib/queries-banner-slider";
+import { sanitizeHtml } from "~/lib/sanitize";
+
+interface Props {
+  identifier?: string;
+  heading?: string;
+}
+
+const { identifier = "home", heading } = Astro.props;
+
+const { items } = await getBannerSlider(identifier);
+
+function cleanPlain(v: string | null | undefined): string {
+  if (!v) return "";
+  return sanitizeHtml(v).replace(/<[^>]*>/g, "").trim();
+}
+
+function isSafeHref(v: string | null | undefined): v is string {
+  if (!v) return false;
+  const s = v.trim();
+  if (!s.length) return false;
+  // Allow relative paths and http(s) only; reject javascript:, data:, etc.
+  if (s.startsWith("/") || s.startsWith("#")) return true;
+  return /^https?:\/\//i.test(s);
+}
+
+const safeSlides = items.map((s) => ({
+  title: cleanPlain(s.title),
+  subtitle: cleanPlain(s.subtitle),
+  image: typeof s.image === "string" && s.image.trim().length ? s.image : null,
+  alt: cleanPlain(s.alt) || cleanPlain(s.title),
+  cta_label: cleanPlain(s.cta_label),
+  cta_url: isSafeHref(s.cta_url) ? s.cta_url!.trim() : null,
+}));
+---
+{safeSlides.length > 0 && (
+  <section
+    class="mx-auto max-w-6xl px-0"
+    aria-roledescription="carousel"
+    aria-label={heading ?? "Promotional banners"}
+  >
+    {heading && (
+      <h2 class="sr-only">{heading}</h2>
+    )}
+    <ul
+      class="flex snap-x snap-mandatory overflow-x-auto scroll-smooth [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+      role="list"
+    >
+      {safeSlides.map((s, i) => (
+        <li
+          class="relative w-full flex-none snap-center"
+          aria-roledescription="slide"
+          aria-label={`Slide ${i + 1} of ${safeSlides.length}`}
+        >
+          {s.image ? (
+            <img
+              src={s.image}
+              alt={s.alt || `Banner ${i + 1}`}
+              width="1200"
+              height="500"
+              loading={i === 0 ? "eager" : "lazy"}
+              decoding="async"
+              class="block aspect-[12/5] w-full object-cover"
+            />
+          ) : (
+            <div
+              class="flex aspect-[12/5] w-full items-center justify-center bg-zinc-100"
+              aria-hidden="true"
+            />
+          )}
+          {(s.title || s.subtitle || (s.cta_label && s.cta_url)) && (
+            <div class="absolute inset-0 flex flex-col items-start justify-end gap-2 bg-gradient-to-t from-black/50 via-black/10 to-transparent p-6 text-white sm:p-10">
+              {s.title && (
+                <h3 class="max-w-xl text-xl font-bold tracking-tight sm:text-3xl">
+                  {s.title}
+                </h3>
+              )}
+              {s.subtitle && (
+                <p class="max-w-xl text-sm sm:text-base">{s.subtitle}</p>
+              )}
+              {s.cta_label && s.cta_url && (
+                <a
+                  href={s.cta_url}
+                  class="mt-2 inline-block rounded-md bg-[var(--color-brand)] px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+                >
+                  {s.cta_label}
+                </a>
+              )}
+            </div>
+          )}
+        </li>
+      ))}
+    </ul>
+  </section>
+)}

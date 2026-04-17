@@ -1,0 +1,17 @@
+{
+    "name": "panth/module-productgallery-react",
+    "description": "React/Astro storefront adapter for Panth Productgallery",
+    "type": "magento2-module",
+    "license": "proprietary",
+    "authors": [{ "name": "Kishan Savaliya", "email": "kishansavaliyakb@gmail.com" }],
+    "require": {
+        "php": ">=8.1",
+        "magento/framework": "*",
+        "mage2kishan/module-productgallery": "*",
+        "panth/module-react": "*"
+    },
+    "autoload": {
+        "files": [ "registration.php" ],
+        "psr-4": { "Panth\\ProductgalleryReact\\": "" }
+    }
+}

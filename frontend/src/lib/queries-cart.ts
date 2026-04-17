@@ -215,9 +215,46 @@ export async function createEmptyCart(): Promise<string> {
   return CreateEmptyCartSchema.parse(raw).createEmptyCart;
 }
 
+/**
+ * Resolve the logged-in customer's active cart id. Magento automatically
+ * creates a customer cart on first authenticated GraphQL call; if the
+ * customer has no cart yet the query returns `{id: null}` and we fall back
+ * to whatever guest id the caller already has.
+ */
+const CustomerCartSchema = z.object({
+  customerCart: z.object({ id: z.string().nullable() }).nullable(),
+});
+
+export async function getCustomerCartId(token: string): Promise<string | null> {
+  const doc = /* GraphQL */ `
+    query CustomerCart {
+      customerCart { id }
+    }
+  `;
+  try {
+    const { GraphQLClient } = await import("graphql-request");
+    const isBrowser = typeof window !== "undefined";
+    const endpoint = isBrowser
+      ? `${window.location.origin}/graphql`
+      : (import.meta.env.MAGENTO_GRAPHQL_URL ?? "http://mage2react.local/graphql");
+    const client = new GraphQLClient(endpoint, {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        Store: "default",
+      },
+    });
+    const raw = await client.request<unknown>(doc);
+    const parsed = CustomerCartSchema.parse(raw);
+    return parsed.customerCart?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 const CartQuerySchema = z.object({ cart: Cart.nullable() });
 
-export async function getCart(cartId: string): Promise<CartT | null> {
+export async function getCart(cartId: string, token?: string | null): Promise<CartT | null> {
   const doc = /* GraphQL */ `
     ${CART_FRAGMENT}
     query GetCart($id: String!) {
@@ -227,6 +264,26 @@ export async function getCart(cartId: string): Promise<CartT | null> {
     }
   `;
   try {
+    // Customer carts require an auth header server-side. When a token is
+    // passed we build a one-off client; otherwise fall back to the shared
+    // anonymous client for guest carts.
+    if (token) {
+      const { GraphQLClient } = await import("graphql-request");
+      const isBrowser = typeof window !== "undefined";
+      const endpoint = isBrowser
+        ? `${window.location.origin}/api/graphql`
+        : (import.meta.env.MAGENTO_GRAPHQL_URL ?? "http://mage2react.local/graphql");
+      const client = new GraphQLClient(endpoint, {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          Store: "default",
+        },
+      });
+      const raw = await client.request<unknown>(doc, { id: cartId });
+      const parsed = CartQuerySchema.safeParse(raw);
+      return parsed.success ? parsed.data.cart : null;
+    }
     const raw = await query<unknown>(doc, { id: cartId });
     const parsed = CartQuerySchema.safeParse(raw);
     if (!parsed.success) return null;

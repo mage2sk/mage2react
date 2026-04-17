@@ -233,9 +233,10 @@ const primaryShipping = cart.shipping_addresses?.[0] ?? null;
 const hasShippingAddress = primaryShipping?.country?.code != null;
 const hasShippingMethod = primaryShipping?.selected_shipping_method?.carrier_code != null;
 
-// Enforce step order — a user landing on /payment without a fully-configured
-// shipping step can't proceed, so we bounce them back.
-if (!hasShippingAddress || !hasShippingMethod) {
+// Enforce step order — BUT skip for virtual-only carts which legitimately
+// have no shipping step. The shipping page itself redirects virtual carts
+// here, so we must not bounce them back.
+if (!cart.is_virtual && (!hasShippingAddress || !hasShippingMethod)) {
   return Astro.redirect("/checkout/shipping", 303);
 }
 
@@ -243,6 +244,11 @@ const paymentMethods = (cart.available_payment_methods ?? []).filter(
   (m): m is NonNullable<typeof m> => m != null,
 );
 const selectedPaymentCode = cart.selected_payment_method?.code ?? null;
+const isVirtualCart = cart.is_virtual === true;
+
+// Virtual-only carts never have a shipping address, so the "same as
+// shipping" option isn't usable — force the billing form open.
+if (isVirtualCart) sameAsShipping = false;
 ---
 
 <Layout title="Payment" description="Choose your payment method" noindex>
@@ -293,17 +299,24 @@ const selectedPaymentCode = cart.selected_payment_method?.code ?? null;
       <section class="rounded-xl border border-zinc-200 bg-white p-6">
         <h2 class="mb-4 text-lg font-semibold text-zinc-900">Billing Address</h2>
 
-        <label class="flex items-start gap-2 text-sm">
-          <input
-            type="checkbox"
-            name="same_as_shipping"
-            value="1"
-            checked={sameAsShipping}
-            id="same-as-shipping"
-            class="mt-0.5 h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-400"
-          />
-          <span>My billing address is the same as my shipping address</span>
-        </label>
+        {isVirtualCart ? (
+          <p class="mb-4 rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600">
+            This order contains only digital items — no shipping address is required.
+            Please enter your billing address below.
+          </p>
+        ) : (
+          <label class="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="same_as_shipping"
+              value="1"
+              checked={sameAsShipping}
+              id="same-as-shipping"
+              class="mt-0.5 h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-400"
+            />
+            <span>My billing address is the same as my shipping address</span>
+          </label>
+        )}
 
         <div
           id="billing-form"

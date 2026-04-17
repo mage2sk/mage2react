@@ -1,0 +1,17 @@
+{
+    "name": "panth/module-notification-bar-react",
+    "description": "React/Astro storefront adapter for Panth Notification Bar",
+    "type": "magento2-module",
+    "license": "proprietary",
+    "authors": [{ "name": "Kishan Savaliya", "email": "kishansavaliyakb@gmail.com" }],
+    "require": {
+        "php": ">=8.1",
+        "magento/framework": "*",
+        "panth/module-notification-bar": "*",
+        "panth/module-react": "*"
+    },
+    "autoload": {
+        "files": [ "registration.php" ],
+        "psr-4": { "Panth\\NotificationBarReact\\": "" }
+    }
+}

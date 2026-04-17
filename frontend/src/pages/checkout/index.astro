@@ -24,7 +24,7 @@ if (!cartId) {
 
 // Best-effort cart check — never block the user on a GraphQL error here.
 try {
-  const cart = await getCart(cartId);
+  const cart = await getCart(cartId, token);
   if (cart && cart.total_quantity === 0) {
     return Astro.redirect("/checkout/cart", 303);
   }

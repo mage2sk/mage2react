@@ -1,0 +1,130 @@
+---
+/**
+ * <TestimonialsSlider /> — horizontal scroll-snap slider.
+ *
+ * Renders nothing when the parent module is not installed or returns no
+ * items. Safe to drop into any home/landing section without guard rails.
+ * Pure CSS scroll-snap — no JS required.
+ *
+ * Props:
+ *   - pageSize: how many testimonials to fetch (default 8).
+ *   - heading:  optional section heading.
+ */
+import { getTestimonials } from "~/lib/queries-testimonials";
+import { sanitizeHtml } from "~/lib/sanitize";
+
+interface Props {
+  pageSize?: number;
+  heading?: string;
+}
+
+const { pageSize = 8, heading = "What customers are saying" } = Astro.props;
+
+const { items } = await getTestimonials(pageSize, 1);
+const hasItems = items.length > 0;
+
+function cleanPlain(v: string | null | undefined): string {
+  if (!v) return "";
+  return sanitizeHtml(v).replace(/<[^>]*>/g, "").trim();
+}
+
+function cleanRichBody(v: string | null | undefined): string {
+  if (!v) return "";
+  return sanitizeHtml(v);
+}
+
+function clampRating(v: number | null | undefined): number {
+  if (typeof v !== "number" || !Number.isFinite(v)) return 0;
+  return Math.max(0, Math.min(5, Math.round(v)));
+}
+---
+{hasItems && (
+  <section class="mx-auto max-w-6xl px-0 py-8" aria-label={heading}>
+    <div class="mb-4 flex items-end justify-between gap-3">
+      <h2 class="text-2xl font-bold tracking-tight text-zinc-900">{heading}</h2>
+      <a
+        href="/testimonials"
+        class="text-sm font-medium text-[var(--color-brand)] hover:underline"
+      >
+        See all
+      </a>
+    </div>
+    <ul
+      class="flex snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth pb-3 [scrollbar-width:thin]"
+      role="list"
+    >
+      {items.map((t) => {
+        const name = cleanPlain(t.customer_name) || "Anonymous";
+        const title = cleanPlain(t.title);
+        const body = cleanRichBody(t.body);
+        const rating = clampRating(t.rating);
+        const photo = typeof t.photo === "string" && t.photo.trim().length ? t.photo : null;
+        const ratingLabel = `${rating} out of 5 stars`;
+        return (
+          <li class="w-[min(85%,22rem)] flex-none snap-start">
+            <article class="flex h-full flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+              <div class="flex items-center gap-3">
+                {photo ? (
+                  <img
+                    src={photo}
+                    alt={`${name} profile photo`}
+                    width="40"
+                    height="40"
+                    loading="lazy"
+                    decoding="async"
+                    class="size-10 rounded-full object-cover"
+                  />
+                ) : (
+                  <span
+                    class="grid size-10 place-items-center rounded-full bg-zinc-100 text-zinc-500"
+                    aria-hidden="true"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      class="size-5"
+                    >
+                      <path d="M20 21a8 8 0 0 0-16 0" />
+                      <circle cx="12" cy="7" r="4" />
+                    </svg>
+                  </span>
+                )}
+                <p class="text-sm font-semibold text-zinc-900">{name}</p>
+              </div>
+
+              <div class="flex items-center gap-0.5" aria-label={ratingLabel} role="img">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill={i < rating ? "currentColor" : "none"}
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linejoin="round"
+                    class={i < rating ? "size-4 text-amber-500" : "size-4 text-zinc-300"}
+                    aria-hidden="true"
+                  >
+                    <path d="M12 2.5l2.92 5.92 6.54.95-4.73 4.61 1.12 6.52L12 17.77l-5.85 3.07 1.12-6.52L2.54 9.37l6.54-.95L12 2.5z" />
+                  </svg>
+                ))}
+              </div>
+
+              {title && <h3 class="text-sm font-semibold text-zinc-900">{title}</h3>}
+              {body && (
+                <div
+                  class="line-clamp-4 text-sm text-zinc-700"
+                  set:html={body}
+                />
+              )}
+            </article>
+          </li>
+        );
+      })}
+    </ul>
+  </section>
+)}

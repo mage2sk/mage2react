@@ -1,5 +1,6 @@
 import { defineMiddleware } from "astro:middleware";
-import { CART_COOKIE_NAME, createEmptyCart } from "~/lib/queries-cart";
+import { CART_COOKIE_NAME, createEmptyCart, getCustomerCartId } from "~/lib/queries-cart";
+import { getCustomerToken } from "~/lib/auth";
 
 const MEDIA_ORIGIN = "https://mage2react.local";
 
@@ -75,7 +76,24 @@ export const onRequest = defineMiddleware(async (ctx, next) => {
       BOOTSTRAP_SKIP_EXT.test(path);
     if (!skip) {
       const existing = ctx.cookies.get(CART_COOKIE_NAME)?.value;
-      if (!existing) {
+      const token = getCustomerToken(ctx);
+
+      // Logged-in customers: always sync the cart cookie to their Magento
+      // customer cart id. This prevents the "cannot perform operations on
+      // cart …" error the browser otherwise gets when trying to mutate a
+      // guest cart as an authenticated user.
+      if (token) {
+        const customerCartId = await getCustomerCartId(token);
+        if (customerCartId && customerCartId !== existing) {
+          ctx.cookies.set(CART_COOKIE_NAME, customerCartId, {
+            httpOnly: false,
+            secure: true,
+            sameSite: "lax",
+            maxAge: 60 * 60 * 24 * 365,
+            path: "/",
+          });
+        }
+      } else if (!existing) {
         const id = await createEmptyCart();
         ctx.cookies.set(CART_COOKIE_NAME, id, {
           httpOnly: false,

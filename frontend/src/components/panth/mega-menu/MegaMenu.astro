@@ -1,0 +1,215 @@
+---
+/**
+ * <MegaMenu /> — full-width dropdown mega menu for `Panth_MegaMenu`.
+ *
+ * Pure Astro. Zero JS. Dropdown panels open on hover AND keyboard focus-
+ * within via Tailwind `group:hover` + `group:focus-within`. Each top-level
+ * item renders as a button/link in the primary nav; hovering/focusing opens
+ * a full-width panel with subcategory columns, an optional featured-product
+ * card, and an optional promo image. An admin-authored HTML block may also
+ * render (sanitized).
+ *
+ * Import into `src/layouts/Base.astro`'s primary nav slot:
+ *
+ *   import MegaMenu from "~/components/panth/mega-menu/MegaMenu.astro";
+ *   <MegaMenu />
+ *
+ * This module ships the component only; `Base.astro` is out of scope.
+ *
+ * Renders nothing when the parent module is absent or returns zero items.
+ */
+import { getMegaMenu } from "~/lib/queries-mega-menu";
+import { sanitizeHtml } from "~/lib/sanitize";
+
+const { items } = await getMegaMenu();
+
+function cleanPlain(v: string | null | undefined): string {
+  if (!v) return "";
+  return sanitizeHtml(v).replace(/<[^>]*>/g, "").trim();
+}
+
+function isSafeHref(v: string | null | undefined): string | null {
+  if (!v) return null;
+  const s = v.trim();
+  if (!s.length) return null;
+  if (s.startsWith("/") || s.startsWith("#")) return s;
+  if (/^https?:\/\//i.test(s)) return s;
+  return null;
+}
+
+function asImageSrc(v: string | null | undefined): string | null {
+  if (!v) return null;
+  const s = v.trim();
+  if (!s.length) return null;
+  if (s.startsWith("/") || /^https?:\/\//i.test(s)) return s;
+  return null;
+}
+---
+{items.length > 0 && (
+  <nav aria-label="Primary" class="relative">
+    <ul class="flex flex-wrap items-stretch gap-1">
+      {items.map((item) => {
+        const label = cleanPlain(item.label);
+        const href = isSafeHref(item.url);
+        if (!label) return null;
+
+        const columns = (item.columns ?? []).filter(Boolean);
+        const fp = item.featured_product ?? null;
+        const fpHref = isSafeHref(fp?.url ?? null);
+        const fpImg = asImageSrc(fp?.image ?? null);
+        const promo = item.promo_image ?? null;
+        const promoHref = isSafeHref(promo?.url ?? null);
+        const promoImg = asImageSrc(promo?.image ?? null);
+        const promoAlt = cleanPlain(promo?.alt) || label;
+        const htmlBlock = item.html_block
+          ? sanitizeHtml(item.html_block)
+          : "";
+
+        const hasPanel =
+          columns.length > 0 ||
+          (fp && (fp.name || fpImg)) ||
+          promoImg ||
+          htmlBlock.length > 0;
+
+        return (
+          <li class="group relative flex items-stretch">
+            {href ? (
+              <a
+                href={href}
+                class="inline-flex items-center px-3 py-3 text-sm font-medium text-zinc-800 hover:text-[var(--color-brand)] focus:outline-none focus:text-[var(--color-brand)]"
+              >
+                {label}
+                {hasPanel && (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    width="14"
+                    height="14"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    class="ml-1"
+                    aria-hidden="true"
+                  >
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                )}
+              </a>
+            ) : (
+              <span class="inline-flex items-center px-3 py-3 text-sm font-medium text-zinc-800">
+                {label}
+              </span>
+            )}
+
+            {hasPanel && (
+              <div
+                class="invisible absolute left-0 top-full z-40 w-screen -translate-x-4 bg-white shadow-xl ring-1 ring-zinc-200 opacity-0 transition duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100 motion-reduce:transition-none"
+                role="group"
+                aria-label={`${label} menu`}
+              >
+                <div class="mx-auto grid max-w-6xl grid-cols-1 gap-8 p-6 md:grid-cols-12">
+                  {columns.length > 0 && (
+                    <div class="md:col-span-7">
+                      <div class={`grid gap-6 grid-cols-1 sm:grid-cols-2 ${columns.length >= 3 ? "md:grid-cols-3" : ""}`}>
+                        {columns.slice(0, 4).map((col) => {
+                          const colTitle = cleanPlain(col?.title);
+                          const links = (col?.links ?? []).filter(Boolean);
+                          return (
+                            <div>
+                              {colTitle && (
+                                <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                  {colTitle}
+                                </h3>
+                              )}
+                              <ul class="space-y-1.5">
+                                {links.map((l) => {
+                                  const linkLabel = cleanPlain(l?.label);
+                                  const linkHref = isSafeHref(l?.url);
+                                  if (!linkLabel || !linkHref) return null;
+                                  return (
+                                    <li>
+                                      <a
+                                        href={linkHref}
+                                        class="block text-sm text-zinc-700 hover:text-[var(--color-brand)]"
+                                      >
+                                        {linkLabel}
+                                      </a>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {htmlBlock && (
+                        <div
+                          class="prose prose-sm mt-6 max-w-none text-zinc-700"
+                          set:html={htmlBlock}
+                        />
+                      )}
+                    </div>
+                  )}
+
+                  <div class="md:col-span-5 flex flex-col gap-4">
+                    {fp && (fp.name || fpImg) && (
+                      <a
+                        href={fpHref ?? "#"}
+                        class={`block rounded-lg border border-zinc-200 p-3 transition hover:border-[var(--color-brand)] ${fpHref ? "" : "pointer-events-none"}`}
+                      >
+                        {fpImg && (
+                          <img
+                            src={fpImg}
+                            alt={cleanPlain(fp.name) || "Featured product"}
+                            width="240"
+                            height="240"
+                            loading="lazy"
+                            decoding="async"
+                            class="mb-2 aspect-square w-full rounded object-cover"
+                          />
+                        )}
+                        <p class="text-xs uppercase tracking-wide text-zinc-500">
+                          Featured
+                        </p>
+                        {fp.name && (
+                          <p class="mt-0.5 text-sm font-semibold text-zinc-900">
+                            {cleanPlain(fp.name)}
+                          </p>
+                        )}
+                        {fp.price && (
+                          <p class="text-sm text-[var(--color-brand)]">
+                            {cleanPlain(fp.price)}
+                          </p>
+                        )}
+                      </a>
+                    )}
+
+                    {promoImg && (
+                      <a
+                        href={promoHref ?? "#"}
+                        class={`block overflow-hidden rounded-lg ${promoHref ? "" : "pointer-events-none"}`}
+                        aria-label={promoAlt}
+                      >
+                        <img
+                          src={promoImg}
+                          alt={promoAlt}
+                          width="480"
+                          height="240"
+                          loading="lazy"
+                          decoding="async"
+                          class="block aspect-[2/1] w-full object-cover"
+                        />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  </nav>
+)}

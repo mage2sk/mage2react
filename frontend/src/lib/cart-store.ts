@@ -136,17 +136,44 @@ export function bootstrapCart(): void {
     });
   }
 
-  const id = readCookie(CART_COOKIE_NAME);
-  if (!id) return; // middleware bootstraps the cookie; absent here means first request failed silently.
+  // Refetch the cart on every Astro view-transition AND on full page loads
+  // (covers form-submit redirects, session changes, etc.). Initial fetch is
+  // fired immediately below.
+  const listen = (): void => {
+    const id = readCookie(CART_COOKIE_NAME);
+    if (!id) {
+      cart.set(null);
+      cartId.set(null);
+      return;
+    }
+    if (cartId.get() !== id) cartId.set(id);
+    void (async () => {
+      try {
+        const c = await getCart(id);
+        cart.set(c);
+      } catch {
+        // network error; keep previous state, UI handles skeleton/empty.
+      }
+    })();
+  };
 
-  cartId.set(id);
+  window.addEventListener("astro:page-load", listen);
+  window.addEventListener("pageshow", listen);
+  listen();
+}
+
+/** Force a fresh cart refetch. Call after any server-side mutation that
+ *  changed the cart but didn't go through our store (e.g. reorder). */
+export function refetchCart(): void {
+  const id = readCookie(CART_COOKIE_NAME);
+  if (!id) return;
+  if (cartId.get() !== id) cartId.set(id);
   void (async () => {
     try {
       const c = await getCart(id);
       cart.set(c);
-    } catch {
-      // network error; cart stays null and the UI shows skeletons / empty.
-    }
+      publish({ type: "cart-updated", cart: c });
+    } catch { /* swallow */ }
   })();
 }
 
@@ -189,9 +216,12 @@ function isStaleCartError(e: { code?: string | null; message?: string | null } |
   const m = (e.message ?? "").toLowerCase();
   return (
     e.code === "NO_SUCH_ENTITY" ||
+    e.code === "graphql-authorization" ||
     m.includes("could not find a cart") ||
     m.includes("cart isn't active") ||
-    m.includes("current user cannot")
+    m.includes("current user cannot") ||
+    m.includes("cannot perform operations") ||
+    m.includes("not allowed to access this cart")
   );
 }
 
@@ -228,7 +258,13 @@ export async function addItem(input: AddOptions): Promise<boolean> {
       return { ok: true, stale: false };
     } catch (err) {
       const msg = err instanceof Error ? err.message : "";
-      if (msg.toLowerCase().includes("could not find a cart")) {
+      const lower = msg.toLowerCase();
+      if (
+        lower.includes("could not find a cart") ||
+        lower.includes("cannot perform operations") ||
+        lower.includes("not allowed to access this cart") ||
+        lower.includes("graphql-authorization")
+      ) {
         return { ok: false, stale: true, message: msg };
       }
       throw err;

@@ -1,0 +1,106 @@
+---
+/**
+ * ContactInfoSidebar.astro — phone / email / hours / optional embedded map.
+ *
+ * Drop-in sidebar for the `/contact` page or any landing page. Reads admin
+ * config from `getContactConfig()`. Renders nothing when there is no data
+ * at all (prevents an empty chrome-heavy box from appearing on a fresh
+ * install with no config).
+ *
+ * Security:
+ *   - `map_embed_url` is validated against an allowlist of trusted embed
+ *     origins (Google Maps, OpenStreetMap). Anything else is dropped.
+ *   - All plain-text fields pass through `sanitizeHtml()` + tag strip.
+ *   - The iframe uses a minimal `sandbox` to block form submissions and
+ *     top-navigation from inside the map.
+ */
+import { getContactConfig } from "~/lib/queries-advanced-contact-us";
+import { sanitizeHtml } from "~/lib/sanitize";
+
+const { phone, email, hours, map_embed_url } = await getContactConfig();
+
+function plain(v: string | null | undefined): string {
+  if (!v) return "";
+  return sanitizeHtml(v).replace(/<[^>]*>/g, "").trim();
+}
+
+const ALLOWED_MAP_HOSTS: readonly string[] = [
+  "www.google.com",
+  "maps.google.com",
+  "www.openstreetmap.org",
+];
+
+function validateMapUrl(raw: string | null): string | null {
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "https:") return null;
+    if (!ALLOWED_MAP_HOSTS.includes(u.host)) return null;
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
+const phoneClean = plain(phone);
+const emailClean = plain(email);
+const hoursClean = plain(hours);
+const mapUrl = validateMapUrl(map_embed_url);
+
+const hasAny = phoneClean || emailClean || hoursClean || mapUrl;
+
+// Strip a leading `+` and spaces for `tel:` href.
+const telHref = phoneClean ? `tel:${phoneClean.replace(/[^+0-9]/g, "")}` : null;
+const emailHref = emailClean ? `mailto:${emailClean}` : null;
+---
+
+{hasAny && (
+  <aside
+    class="flex flex-col gap-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-5"
+    aria-label="Contact information"
+  >
+    <h2 class="text-base font-semibold text-[var(--color-fg)]">Get in touch</h2>
+
+    <ul class="flex flex-col gap-3 text-sm text-[var(--color-fg)]">
+      {phoneClean && telHref && (
+        <li class="flex items-start gap-2">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor" class="mt-0.5 shrink-0 text-[var(--color-brand)]">
+            <path d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.5.6a1 1 0 0 1 1 1v3.5a1 1 0 0 1-1 1C9 21 3 15 3 6.5a1 1 0 0 1 1-1H7.5a1 1 0 0 1 1 1c0 1.2.2 2.4.6 3.5.1.3 0 .7-.2 1l-2.3 1.8z"/>
+          </svg>
+          <a href={telHref} class="hover:underline">{phoneClean}</a>
+        </li>
+      )}
+      {emailClean && emailHref && (
+        <li class="flex items-start gap-2">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor" class="mt-0.5 shrink-0 text-[var(--color-brand)]">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6c0-1.1.9-2 2-2zm8 7L4 6v12h16V6l-8 5z"/>
+          </svg>
+          <a href={emailHref} class="hover:underline">{emailClean}</a>
+        </li>
+      )}
+      {hoursClean && (
+        <li class="flex items-start gap-2">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor" class="mt-0.5 shrink-0 text-[var(--color-brand)]">
+            <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm.5 5v5.2l4 2.4-.8 1.3-4.7-2.8V7z"/>
+          </svg>
+          <span class="whitespace-pre-line">{hoursClean}</span>
+        </li>
+      )}
+    </ul>
+
+    {mapUrl && (
+      <div class="overflow-hidden rounded-md border border-[var(--color-border)]">
+        <iframe
+          src={mapUrl}
+          title="Map"
+          width="100%"
+          height="240"
+          loading="lazy"
+          referrerpolicy="no-referrer-when-downgrade"
+          sandbox="allow-scripts allow-same-origin allow-popups"
+          class="block w-full border-0"
+        ></iframe>
+      </div>
+    )}
+  </aside>
+)}

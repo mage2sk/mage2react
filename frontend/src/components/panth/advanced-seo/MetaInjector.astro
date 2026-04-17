@@ -1,0 +1,57 @@
+---
+/**
+ * <MetaInjector /> — pure Astro fragment that fetches AI/admin-authored
+ * meta overrides from `Panth_AdvancedSeo` and emits `<meta>` / `<link>`
+ * tags directly into `<head>`. Safe on failure: emits nothing when the
+ * parent module is offline or the schema is missing.
+ *
+ * Wiring: this component must be placed inside `<head>` AFTER the existing
+ * `<Seo />` call so that AdvancedSeo values take precedence via browser
+ * "last one wins" semantics for `<meta name>` / `<link rel="canonical">`.
+ *
+ * Example inside a forked `Base.astro`:
+ *
+ *   <head>
+ *     <Seo ...props />
+ *     <MetaInjector path={Astro.url.pathname} />
+ *     ...
+ *   </head>
+ *
+ * Do not edit the repository's main `Base.astro` from this module — copy it,
+ * or call `<MetaInjector />` from the page template above the layout.
+ */
+import { getAdvancedSeoMeta } from "~/lib/queries-advanced-seo";
+import { sanitizeHtml } from "~/lib/sanitize";
+
+interface Props {
+  path: string;
+}
+
+const { path } = Astro.props;
+
+const override = await getAdvancedSeoMeta(path);
+
+// All string fields pass through sanitizeHtml and then we take textContent
+// semantics by attribute-binding — Astro auto-escapes attribute values, so
+// the double-strip is defence in depth.
+function clean(v: string | null | undefined): string | null {
+  if (!v) return null;
+  const s = sanitizeHtml(v).replace(/<[^>]*>/g, "").trim();
+  return s.length ? s : null;
+}
+
+const title = clean(override?.title);
+const description = clean(override?.description);
+const canonical = clean(override?.canonical);
+const robots = clean(override?.robots) ?? (override?.noindex ? "noindex, nofollow" : null);
+const ogImage = clean(override?.og_image);
+const ogImageAlt = clean(override?.og_image_alt);
+---
+{title && <title>{title}</title>}
+{description && <meta name="description" content={description} />}
+{canonical && <link rel="canonical" href={canonical} />}
+{robots && <meta name="robots" content={robots} />}
+{ogImage && <meta property="og:image" content={ogImage} />}
+{ogImage && ogImageAlt && <meta property="og:image:alt" content={ogImageAlt} />}
+{title && <meta property="og:title" content={title} />}
+{description && <meta property="og:description" content={description} />}

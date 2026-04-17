@@ -1,0 +1,119 @@
+---
+/**
+ * OrderCommentsField.astro
+ *
+ * Panth_CheckoutExtendedReact — SSR-rendered order-comment textarea that
+ * POSTs to the extended `setOrderCommentOnCart` mutation via a small
+ * inline script. The field is progressive: the form submits the entered
+ * text via the mutation on blur; if JavaScript is disabled the textarea
+ * still submits with a sibling form POST.
+ *
+ * INTEGRATION (leave as comments; never auto-wire — do NOT edit
+ * `/frontend/src/pages/checkout/payment.astro` from this module):
+ *
+ *   1. Fork the payment page and render above the place-order button:
+ *
+ *        ---
+ *        import OrderCommentsField from
+ *          "~/components/panth/checkout-extended/OrderCommentsField.astro";
+ *        ---
+ *        <OrderCommentsField cartId={cartId} />
+ *
+ *   2. Or compose into a bespoke payment template.
+ *
+ * All pre-fill values are rendered as text nodes (never `set:html`), and
+ * `sanitizeHtml` guards the label copy in case the parent module returns
+ * admin-authored markup.
+ */
+import { getCheckoutExtended, getCheckoutExtendedConfig } from "~/lib/queries-checkout-extended";
+import { sanitizeHtml } from "~/lib/sanitize";
+
+interface Props {
+  cartId: string;
+  /** Override label (defaults to the parent module's admin-configured copy or a sensible default). */
+  label?: string;
+}
+
+const { cartId, label } = Astro.props as Props;
+
+const [data, config] = await Promise.all([
+  cartId ? getCheckoutExtended(cartId) : Promise.resolve(null),
+  getCheckoutExtendedConfig(),
+]);
+
+const enabled =
+  (config?.panth_checkout_extended_enabled ?? true) !== false &&
+  (config?.panth_checkout_extended_order_comment_enabled ?? true) !== false;
+
+const maxLen = data?.order_comment_max_length ?? 500;
+const value = data?.order_comment ?? "";
+const resolvedLabel = sanitizeHtml(label ?? "Order comments (optional)");
+---
+
+{enabled && (
+  <div class="mt-4" data-panth-order-comments>
+    <label
+      for="panth-order-comments"
+      class="block text-sm font-medium text-[var(--color-fg,theme(colors.gray.800))] mb-1"
+    >
+      {resolvedLabel}
+    </label>
+    <textarea
+      id="panth-order-comments"
+      name="panth_order_comment"
+      rows={3}
+      maxlength={maxLen}
+      class="block w-full rounded-md border border-[var(--color-border,theme(colors.gray.300))] bg-white p-2 text-sm text-[var(--color-fg,theme(colors.gray.900))] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand,theme(colors.emerald.500))]"
+      data-cart-id={cartId}
+      data-max={String(maxLen)}
+    >{value}</textarea>
+    <p class="mt-1 text-xs text-[var(--color-fg-muted,theme(colors.gray.500))]" data-panth-counter>
+      0 / {maxLen}
+    </p>
+  </div>
+)}
+
+<script>
+  // Lightweight controller: debounces blur/change and posts via the
+  // setOrderCommentOnCart mutation. We lazy-import the query helper so the
+  // script only pulls in `graphql-request` when the user actually edits.
+  (function () {
+    const wrapper = document.querySelector<HTMLElement>("[data-panth-order-comments]");
+    if (!wrapper) return;
+    const ta = wrapper.querySelector<HTMLTextAreaElement>("textarea");
+    const counter = wrapper.querySelector<HTMLElement>("[data-panth-counter]");
+    if (!ta) return;
+    const cartId = ta.dataset.cartId ?? "";
+    const maxLen = Number(ta.dataset.max ?? "500");
+
+    function updateCounter(): void {
+      if (!counter || !ta) return;
+      counter.textContent = `${ta.value.length} / ${maxLen}`;
+    }
+    updateCounter();
+    ta.addEventListener("input", updateCounter);
+
+    let lastSent = ta.value;
+    async function submit(): Promise<void> {
+      if (!cartId || !ta) return;
+      const next = ta.value;
+      if (next === lastSent) return;
+      lastSent = next;
+      try {
+        const mod = await import("~/lib/queries-checkout-extended");
+        await mod.setOrderCommentOnCart(cartId, next);
+      } catch {
+        // swallow; parent module may not be installed.
+      }
+    }
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    ta.addEventListener("input", () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(submit, 600);
+    });
+    ta.addEventListener("blur", () => {
+      if (timer) clearTimeout(timer);
+      void submit();
+    });
+  })();
+</script>

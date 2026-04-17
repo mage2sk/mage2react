@@ -807,13 +807,17 @@ export function friendlyCheckoutError(err: unknown): string {
     const m = raw.replace(/^GraphQL request failed:\s*/i, "").trim();
     return m || "Please check the email address and try again.";
   }
+  if (lower.includes("no items for shipment") || lower.includes("shipping address is not allowed"))
+    return "Your cart has no shippable items. Downloadable/virtual orders skip shipping — proceed to payment.";
   if (lower.includes("shipping method"))
     return "Please choose a shipping method before continuing.";
   if (lower.includes("payment method"))
     return "Please choose a payment method before placing your order.";
   if (lower.includes("address")) return "Please check the address and try again.";
-  // Common Magento GraphQL wrapper prefix — strip it
-  const cleaned = raw.replace(/^GraphQL Error \(Code:?\s*\d+\):?\s*/i, "");
+  // Common Magento GraphQL wrapper prefixes — strip them and drop response
+  // JSON that sometimes comes bundled with the error string.
+  const firstLine = raw.split(":")[0] ?? raw;
+  const cleaned = firstLine.replace(/^GraphQL Error \(Code:?\s*\d+\):?\s*/i, "").trim();
   if (cleaned.length > 0 && cleaned.length < 240) return cleaned;
   return "We couldn't complete your request. Please try again.";
 }

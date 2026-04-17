@@ -1,0 +1,233 @@
+---
+/**
+ * PanthContactForm.astro — SSR contact form driven by `Panth_AdvancedContactUs`.
+ *
+ * - Server-rendered. No hydration required; `<form method="post">` would work
+ *   against the sibling endpoint but we POST JSON from a tiny inline script
+ *   to keep the UX consistent with the newsletter pattern.
+ * - Fields and subject options come from `getContactConfig()`. If the parent
+ *   module isn't installed we render a small friendly notice and nothing
+ *   else — no broken form.
+ * - Labels / placeholders pass through `sanitizeHtml()` (plain text only).
+ * - Every field type (`text`, `email`, `tel`, `textarea`, `select`,
+ *   `checkbox`, `radio`) maps to the correct native input with `required`
+ *   honored. Extra HTML attributes are never forwarded verbatim.
+ *
+ * Drop-in usage:
+ *   <PanthContactForm />
+ */
+import { getContactConfig, type ContactField } from "~/lib/queries-advanced-contact-us";
+import { sanitizeHtml } from "~/lib/sanitize";
+
+const config = await getContactConfig();
+const hasFields = config.fields.length > 0;
+
+function plain(s: string | null | undefined): string {
+  if (!s) return "";
+  return sanitizeHtml(s).replace(/<[^>]*>/g, "").trim();
+}
+
+function fieldName(f: ContactField): string {
+  // Collapse to a safe HTML-attribute value. The server re-validates against
+  // the same config so an exotic id only produces a hash, not a crash.
+  return `f_${f.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+}
+
+const subjects = config.subject_options;
+const hasSubjects = subjects.length > 0;
+---
+
+{hasFields ? (
+  <form
+    id="panth-contact-form"
+    class="flex flex-col gap-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-5"
+    aria-label="Contact form"
+    novalidate
+  >
+    {hasSubjects && (
+      <div class="flex flex-col gap-1">
+        <label for="panth-contact-subject" class="text-sm font-medium text-[var(--color-fg)]">
+          Subject<span aria-hidden="true" class="ml-0.5 text-[var(--color-danger,theme(colors.red.700))]">*</span>
+        </label>
+        <select
+          id="panth-contact-subject"
+          name="subject"
+          required
+          class="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+        >
+          <option value="">Select a subject</option>
+          {subjects.map((s) => (
+            <option value={plain(s)}>{plain(s)}</option>
+          ))}
+        </select>
+      </div>
+    )}
+
+    {config.fields.map((f) => {
+      const name = fieldName(f);
+      const label = plain(f.label);
+      const placeholder = plain(f.placeholder ?? "");
+
+      if (f.type === "textarea") {
+        return (
+          <div class="flex flex-col gap-1">
+            <label for={name} class="text-sm font-medium text-[var(--color-fg)]">
+              {label}{f.required && <span aria-hidden="true" class="ml-0.5 text-[var(--color-danger,theme(colors.red.700))]">*</span>}
+            </label>
+            <textarea
+              id={name}
+              name={name}
+              required={f.required}
+              placeholder={placeholder || undefined}
+              rows={5}
+              maxlength={5000}
+              class="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+            />
+          </div>
+        );
+      }
+
+      if (f.type === "select") {
+        return (
+          <div class="flex flex-col gap-1">
+            <label for={name} class="text-sm font-medium text-[var(--color-fg)]">
+              {label}{f.required && <span aria-hidden="true" class="ml-0.5 text-[var(--color-danger,theme(colors.red.700))]">*</span>}
+            </label>
+            <select
+              id={name}
+              name={name}
+              required={f.required}
+              class="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+            >
+              <option value="">Select an option</option>
+              {f.options.map((o) => (
+                <option value={o.value}>{plain(o.label)}</option>
+              ))}
+            </select>
+          </div>
+        );
+      }
+
+      if (f.type === "radio") {
+        return (
+          <fieldset class="flex flex-col gap-1">
+            <legend class="text-sm font-medium text-[var(--color-fg)]">
+              {label}{f.required && <span aria-hidden="true" class="ml-0.5 text-[var(--color-danger,theme(colors.red.700))]">*</span>}
+            </legend>
+            <div class="flex flex-wrap gap-3 pt-1">
+              {f.options.map((o, idx) => (
+                <label class="flex items-center gap-2 text-sm text-[var(--color-fg)]">
+                  <input
+                    type="radio"
+                    name={name}
+                    value={o.value}
+                    required={f.required && idx === 0}
+                    class="accent-[var(--color-brand)]"
+                  />
+                  <span>{plain(o.label)}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        );
+      }
+
+      if (f.type === "checkbox") {
+        return (
+          <label class="flex items-center gap-2 text-sm text-[var(--color-fg)]">
+            <input
+              type="checkbox"
+              name={name}
+              value="on"
+              required={f.required}
+              class="accent-[var(--color-brand)]"
+            />
+            <span>{label}{f.required && <span aria-hidden="true" class="ml-0.5 text-[var(--color-danger,theme(colors.red.700))]">*</span>}</span>
+          </label>
+        );
+      }
+
+      const inputType = f.type === "email" ? "email" : f.type === "tel" ? "tel" : "text";
+      return (
+        <div class="flex flex-col gap-1">
+          <label for={name} class="text-sm font-medium text-[var(--color-fg)]">
+            {label}{f.required && <span aria-hidden="true" class="ml-0.5 text-[var(--color-danger,theme(colors.red.700))]">*</span>}
+          </label>
+          <input
+            id={name}
+            name={name}
+            type={inputType}
+            required={f.required}
+            placeholder={placeholder || undefined}
+            maxlength={inputType === "email" ? 254 : 1000}
+            autocomplete={inputType === "email" ? "email" : inputType === "tel" ? "tel" : "off"}
+            class="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+          />
+        </div>
+      );
+    })}
+
+    <button
+      type="submit"
+      class="inline-flex items-center justify-center rounded-md bg-[var(--color-brand)] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]"
+    >
+      Send message
+    </button>
+
+    <p
+      class="mt-1 text-sm"
+      role="status"
+      aria-live="polite"
+      data-panth-contact-status
+    ></p>
+  </form>
+) : (
+  <p class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-sm text-[var(--color-fg-muted)]">
+    The contact form has not been configured yet.
+  </p>
+)}
+
+<script is:inline>
+  (function () {
+    const form = document.getElementById("panth-contact-form");
+    if (!form || !(form instanceof HTMLFormElement)) return;
+    const status = form.querySelector("[data-panth-contact-status]");
+    const btn = form.querySelector('button[type="submit"]');
+    function setStatus(msg, ok) {
+      if (!status) return;
+      status.textContent = msg;
+      status.style.color = ok
+        ? "var(--color-success, #065f46)"
+        : "var(--color-danger, #991b1b)";
+    }
+    form.addEventListener("submit", async function (ev) {
+      ev.preventDefault();
+      if (!(form instanceof HTMLFormElement)) return;
+      const fd = new FormData(form);
+      const payload = {};
+      for (const [k, v] of fd.entries()) {
+        if (typeof v === "string") payload[k] = v;
+      }
+      if (btn instanceof HTMLButtonElement) btn.disabled = true;
+      setStatus("Sending...", true);
+      try {
+        const res = await fetch("/api/panth/contact", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setStatus((data && data.message) || "Could not send. Please try again.", false);
+        } else {
+          setStatus((data && data.message) || "Thanks — we will be in touch.", true);
+          form.reset();
+        }
+      } catch {
+        setStatus("Network error. Please try again.", false);
+      } finally {
+        if (btn instanceof HTMLButtonElement) btn.disabled = false;
+      }
+    });
+  })();
+</script>

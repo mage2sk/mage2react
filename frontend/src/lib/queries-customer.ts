@@ -15,8 +15,11 @@ import { query } from "./graphql";
  * customer sessions would race on a shared header.
  */
 const isBrowser = typeof window !== "undefined";
+// Server-side hits Magento directly. Browser-side goes through our Astro
+// proxy at /api/graphql which forwards with auth headers from the HttpOnly
+// token cookie — so client islands never see the raw token.
 const endpoint = isBrowser
-  ? `${window.location.origin}/graphql`
+  ? `${window.location.origin}/api/graphql`
   : (import.meta.env.MAGENTO_GRAPHQL_URL ?? "http://mage2react.local/graphql");
 
 export async function authQuery<T>(
@@ -49,7 +52,7 @@ const Region = z
   .object({
     region_code: z.string().nullable().optional(),
     region: z.string().nullable().optional(),
-    region_id: z.number().nullable().optional(),
+    region_id: z.union([z.number(), z.string()]).nullable().optional(),
   })
   .nullable()
   .optional();
@@ -400,7 +403,7 @@ const OrderAddress = z.object({
   street: z.array(z.string()).nullable(),
   city: z.string().nullable(),
   region: z.string().nullable().optional(),
-  region_id: z.number().nullable().optional(),
+  region_id: z.union([z.number(), z.string()]).nullable().optional(),
   postcode: z.string().nullable(),
   country_code: z.string().nullable(),
   telephone: z.string().nullable(),

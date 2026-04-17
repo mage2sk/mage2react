@@ -1,0 +1,17 @@
+{
+    "name": "panth/module-price-drop-alert-react",
+    "description": "React/Astro storefront adapter for Panth Price Drop Alert",
+    "type": "magento2-module",
+    "license": "proprietary",
+    "authors": [{ "name": "Kishan Savaliya", "email": "kishansavaliyakb@gmail.com" }],
+    "require": {
+        "php": ">=8.1",
+        "magento/framework": "*",
+        "panth/module-price-drop-alert": "*",
+        "panth/module-react": "*"
+    },
+    "autoload": {
+        "files": [ "registration.php" ],
+        "psr-4": { "Panth\\PriceDropAlertReact\\": "" }
+    }
+}

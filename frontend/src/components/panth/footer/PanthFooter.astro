@@ -1,0 +1,191 @@
+---
+/**
+ * <PanthFooter /> — admin-managed footer renderer for `Panth_Footer`.
+ *
+ * Renders columns, social links, copyright HTML, and payment methods based
+ * on `getFooterConfig()`. If the parent module is not installed (or returns
+ * an empty config), falls back to a minimal structure derived from the
+ * `copyrightHtml` prop so `<PanthFooter />` remains safe to swap in for the
+ * default `Footer.astro`.
+ *
+ * INTEGRATION:
+ *   In `src/layouts/Base.astro`, swap:
+ *     import Footer from "~/components/Footer.astro";
+ *   for:
+ *     import Footer from "~/components/panth/footer/PanthFooter.astro";
+ *   No prop changes required — the fallback `copyrightHtml` prop is honoured.
+ *
+ * This module ships the component; `Base.astro` is out of scope.
+ */
+import { getFooterConfig } from "~/lib/queries-footer";
+import { sanitizeHtml } from "~/lib/sanitize";
+
+type Props = {
+  copyrightHtml?: string;
+};
+
+const { copyrightHtml: fallbackCopyright = "" } = Astro.props;
+
+const cfg = await getFooterConfig();
+
+function cleanPlain(v: string | null | undefined): string {
+  if (!v) return "";
+  return sanitizeHtml(v).replace(/<[^>]*>/g, "").trim();
+}
+
+function isSafeHref(v: string | null | undefined): string | null {
+  if (!v) return null;
+  const s = v.trim();
+  if (!s.length) return null;
+  if (s.startsWith("/") || s.startsWith("#") || s.startsWith("mailto:") || s.startsWith("tel:")) return s;
+  if (/^https?:\/\//i.test(s)) return s;
+  return null;
+}
+
+const copyrightHtmlFinal = cfg.copyright_html
+  ? sanitizeHtml(cfg.copyright_html)
+  : sanitizeHtml(fallbackCopyright);
+
+// SVG paths for well-known social platforms (keyed by lowercased platform).
+const SOCIAL_PATHS: Record<string, string> = {
+  facebook:
+    "M13 22v-8h3l1-4h-4V7.5C13 6.5 13.4 6 14.6 6H17V2.2A26 26 0 0 0 14.3 2C11.6 2 10 3.7 10 6.7V10H7v4h3v8h3z",
+  twitter:
+    "M22 5.9a8.2 8.2 0 0 1-2.4.7 4.2 4.2 0 0 0 1.8-2.3 8.3 8.3 0 0 1-2.6 1 4.1 4.1 0 0 0-7 3.7A11.6 11.6 0 0 1 3.2 4.7a4.1 4.1 0 0 0 1.3 5.5 4 4 0 0 1-1.9-.5v.1a4.1 4.1 0 0 0 3.3 4 4.1 4.1 0 0 1-1.9.1 4.1 4.1 0 0 0 3.8 2.9A8.3 8.3 0 0 1 2 18.6 11.7 11.7 0 0 0 8.3 20.5c7.5 0 11.7-6.3 11.7-11.7v-.5A8.3 8.3 0 0 0 22 5.9z",
+  x: "M22 5.9a8.2 8.2 0 0 1-2.4.7 4.2 4.2 0 0 0 1.8-2.3 8.3 8.3 0 0 1-2.6 1 4.1 4.1 0 0 0-7 3.7A11.6 11.6 0 0 1 3.2 4.7a4.1 4.1 0 0 0 1.3 5.5 4 4 0 0 1-1.9-.5v.1a4.1 4.1 0 0 0 3.3 4 4.1 4.1 0 0 1-1.9.1 4.1 4.1 0 0 0 3.8 2.9A8.3 8.3 0 0 1 2 18.6 11.7 11.7 0 0 0 8.3 20.5c7.5 0 11.7-6.3 11.7-11.7v-.5A8.3 8.3 0 0 0 22 5.9z",
+  instagram:
+    "M12 2.2c3.2 0 3.6 0 4.8.1 1.2 0 1.9.3 2.3.5a3.8 3.8 0 0 1 1.4.9 3.8 3.8 0 0 1 .9 1.4c.2.4.4 1.1.5 2.3.1 1.2.1 1.6.1 4.8s0 3.6-.1 4.8c0 1.2-.3 1.9-.5 2.3a3.8 3.8 0 0 1-.9 1.4 3.8 3.8 0 0 1-1.4.9c-.4.2-1.1.4-2.3.5-1.2.1-1.6.1-4.8.1s-3.6 0-4.8-.1c-1.2 0-1.9-.3-2.3-.5a3.8 3.8 0 0 1-1.4-.9 3.8 3.8 0 0 1-.9-1.4c-.2-.4-.4-1.1-.5-2.3C2.2 15.6 2.2 15.2 2.2 12s0-3.6.1-4.8c0-1.2.3-1.9.5-2.3a3.8 3.8 0 0 1 .9-1.4 3.8 3.8 0 0 1 1.4-.9c.4-.2 1.1-.4 2.3-.5C8.4 2.2 8.8 2.2 12 2.2zm0 5.3a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9zm0 7.4a2.9 2.9 0 1 1 0-5.8 2.9 2.9 0 0 1 0 5.8zM17.8 7a1.1 1.1 0 1 0 0-2.2 1.1 1.1 0 0 0 0 2.2z",
+  pinterest:
+    "M12.1 2a10 10 0 0 0-3.6 19.3c0-.8-.2-2 0-2.9l1.3-5.4s-.3-.7-.3-1.7c0-1.6.9-2.8 2.1-2.8 1 0 1.5.7 1.5 1.6 0 1-.6 2.5-.9 3.9-.3 1.2.6 2.1 1.7 2.1 2.1 0 3.6-2.2 3.6-5.3 0-2.8-2-4.7-4.9-4.7a5 5 0 0 0-5.2 5c0 1 .4 2 .9 2.6.1.1.1.2.1.3l-.3 1.3c0 .2-.2.3-.4.2-1.4-.7-2.3-2.7-2.3-4.4 0-3.6 2.6-6.9 7.5-6.9 3.9 0 7 2.8 7 6.5 0 3.9-2.5 7.1-5.9 7.1-1.1 0-2.2-.6-2.6-1.3l-.7 2.8c-.3 1-1 2.3-1.4 3.1A10 10 0 1 0 12.1 2z",
+  youtube:
+    "M23 7.2s-.2-1.6-.9-2.3c-.8-.9-1.8-.9-2.2-1C16.7 3.5 12 3.5 12 3.5s-4.7 0-7.9.4c-.4.1-1.4.1-2.2 1C1.2 5.6 1 7.2 1 7.2S.7 9 .7 10.9v1.8c0 1.8.3 3.7.3 3.7s.2 1.6.9 2.3c.9 1 2 .9 2.5 1 1.8.1 7.6.4 7.6.4s4.7 0 7.9-.4c.4-.1 1.4-.1 2.2-1 .7-.7.9-2.3.9-2.3s.3-1.8.3-3.7v-1.8c0-1.9-.3-3.7-.3-3.7zM9.8 14.4V8l6.1 3.2-6.1 3.2z",
+  linkedin:
+    "M4 4h4v16H4V4zm2 0a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm4 4h4v2h.1a4 4 0 0 1 3.6-2c3.8 0 4.5 2.5 4.5 5.8V20h-4v-5.5c0-1.3 0-3-1.8-3s-2.1 1.4-2.1 2.9V20h-4V8z",
+  tiktok:
+    "M12.5 2h3a5.5 5.5 0 0 0 4.5 4.5v3a8.5 8.5 0 0 1-4.5-1.3V15a6 6 0 1 1-6-6v3a3 3 0 1 0 3 3V2z",
+};
+
+const columns = cfg.columns.filter(
+  (c) => cleanPlain(c.title).length > 0 || (c.links ?? []).length > 0,
+);
+
+const hasAdminConfig = columns.length > 0 || cfg.social_links.length > 0 || cfg.payment_methods.length > 0;
+---
+<footer class="mt-16 border-t border-zinc-200 bg-zinc-50 text-zinc-700">
+  {hasAdminConfig && (
+    <div class="mx-auto max-w-6xl px-4 py-12">
+      <div class="grid grid-cols-1 gap-10 sm:grid-cols-2 lg:grid-cols-4">
+        {columns.map((col) => {
+          const title = cleanPlain(col.title);
+          const links = (col.links ?? []).filter(Boolean);
+          return (
+            <section aria-label={title || "Footer section"}>
+              {title && (
+                <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-900">
+                  {title}
+                </h2>
+              )}
+              <ul class="space-y-2 text-sm">
+                {links.map((l) => {
+                  const label = cleanPlain(l?.label);
+                  const href = isSafeHref(l?.url);
+                  if (!label) return null;
+                  return (
+                    <li>
+                      {href ? (
+                        <a
+                          href={href}
+                          rel={href === "#" ? "nofollow" : undefined}
+                          class="inline-block hover:text-[var(--color-brand)]"
+                        >
+                          {label}
+                        </a>
+                      ) : (
+                        <span>{label}</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          );
+        })}
+
+        {cfg.social_links.length > 0 && (
+          <section aria-label="Connect">
+            <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-900">
+              Connect
+            </h2>
+            <ul class="flex flex-wrap gap-3">
+              {cfg.social_links.map((s) => {
+                const label = cleanPlain(s.label) || cleanPlain(s.platform) || "Social link";
+                const href = isSafeHref(s.url);
+                if (!href) return null;
+                const key = (s.platform ?? "").trim().toLowerCase();
+                const path = SOCIAL_PATHS[key];
+                return (
+                  <li>
+                    <a
+                      href={href}
+                      aria-label={`Follow us on ${label}`}
+                      rel="noopener"
+                      class="grid size-10 place-items-center rounded-full border border-zinc-300 bg-white text-zinc-700 transition hover:border-[var(--color-brand)] hover:text-[var(--color-brand)]"
+                    >
+                      {path ? (
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 24 24"
+                          width="20"
+                          height="20"
+                          fill="currentColor"
+                          aria-hidden="true"
+                        >
+                          <path d={path} />
+                        </svg>
+                      ) : (
+                        <span class="text-xs font-semibold uppercase" aria-hidden="true">
+                          {label.slice(0, 2)}
+                        </span>
+                      )}
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
+      </div>
+    </div>
+  )}
+
+  <div class="border-t border-zinc-200 bg-white">
+    <div class="mx-auto flex max-w-6xl flex-col items-center gap-4 px-4 py-6 text-xs text-zinc-500 sm:flex-row sm:justify-between">
+      {copyrightHtmlFinal ? (
+        <p class="order-2 text-center sm:order-1 sm:text-left" set:html={copyrightHtmlFinal} />
+      ) : (
+        <p class="order-2 text-center sm:order-1 sm:text-left" />
+      )}
+      {cfg.payment_methods.length > 0 && (
+        <ul
+          class="order-1 flex flex-wrap items-center gap-2 sm:order-2"
+          aria-label="Accepted payment methods"
+        >
+          {cfg.payment_methods.map((pm) => {
+            const label = cleanPlain(pm.label) || cleanPlain(pm.code);
+            if (!label) return null;
+            return (
+              <li
+                class="inline-flex items-center rounded border border-zinc-200 bg-zinc-50 px-2 py-1 text-[10px] font-semibold tracking-wide text-zinc-700"
+                role="img"
+                aria-label={label}
+                title={label}
+              >
+                {label.slice(0, 8).toUpperCase()}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  </div>
+</footer>

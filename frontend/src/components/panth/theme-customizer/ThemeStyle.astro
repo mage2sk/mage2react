@@ -1,0 +1,55 @@
+---
+/**
+ * <ThemeStyle /> — SSR `<style>` emitter for `Panth_ThemeCustomizer`.
+ *
+ * Fetches the admin-configured theme tokens and emits them as CSS custom
+ * properties on `:root`. Tailwind v4's `bg-[var(--color-brand)]` pattern
+ * picks them up automatically at runtime.
+ *
+ * SECURITY: every value has already been validated by `getThemeTokens()`
+ * (hex / rgb / hsl / oklch / named color allowlist for colors; restricted
+ * character set for fonts; numeric unit for radius). Still, we JSON-escape
+ * and filter defensively here as a second line of defence before inserting
+ * into the `<style>` block.
+ *
+ * INTEGRATION: include inside `<head>` of `src/layouts/Base.astro`,
+ * AFTER the base stylesheet so the custom properties take precedence.
+ * This module ships the component; `Base.astro` is out of scope.
+ */
+import { getThemeTokens } from "~/lib/queries-theme-customizer";
+
+const tokens = await getThemeTokens();
+
+// Map of CSS custom-property name -> raw, already-validated value.
+const props: Record<string, string> = {};
+
+if (tokens.colors.brand) props["--color-brand"] = tokens.colors.brand;
+if (tokens.colors.accent) props["--color-accent"] = tokens.colors.accent;
+if (tokens.colors.fg) props["--color-fg"] = tokens.colors.fg;
+if (tokens.colors.bg) props["--color-bg"] = tokens.colors.bg;
+if (tokens.colors.muted) props["--color-muted"] = tokens.colors.muted;
+if (tokens.colors.border) props["--color-border"] = tokens.colors.border;
+if (tokens.fonts.body) props["--font-body"] = tokens.fonts.body;
+if (tokens.fonts.heading) props["--font-heading"] = tokens.fonts.heading;
+if (tokens.radius) props["--radius"] = tokens.radius;
+
+// Defensive final strip — even though the loader already validated, we
+// reject any residual `;{}<>` here so no value can ever close the block.
+function isFinalSafe(v: string): boolean {
+  if (v.length === 0) return false;
+  if (v.length > 256) return false;
+  return !/[;{}<>\\`\n\r]/.test(v);
+}
+
+const lines: string[] = [];
+for (const [name, value] of Object.entries(props)) {
+  if (!isFinalSafe(value)) continue;
+  // Custom-property names are a controlled set above — not user input — so
+  // no escaping is required for the LHS.
+  lines.push(`${name}: ${value};`);
+}
+
+const cssBlock =
+  lines.length > 0 ? `:root {\n  ${lines.join("\n  ")}\n}` : "";
+---
+{cssBlock && <style is:global set:html={cssBlock} />}

@@ -1,0 +1,61 @@
+---
+/**
+ * Generic Panth widget slot.
+ *
+ * Drop `<PanthSlot identifier="banner-slider:home-hero" />` into any Astro
+ * page, CMS template, or category block and it renders the matching Panth
+ * widget. Supported identifiers (grep the backing modules for details):
+ *
+ *   banner-slider:<slider_identifier>       Panth_BannerSlider
+ *   testimonials[:<limit>]                  Panth_Testimonials (slider)
+ *   testimonials-grid[:<limit>]             Panth_Testimonials (grid)
+ *   faq[:<category_url_key>]                Panth_Faq
+ *   form:<url_key>                          Panth_DynamicForms
+ *   cms-block:<identifier>                  Core Magento CMS block
+ *   product-slider:<slug>                   Panth_ProductSlider
+ *   notification-bar                        Panth_NotificationBar
+ *   whatsapp                                Panth_Whatsapp
+ *   live-activity:<sku>                     Panth_LiveActivity
+ *   attachments:<sku>                       Panth_ProductAttachments
+ *
+ * Unknown identifiers render nothing (silent no-op). All error paths
+ * degrade gracefully — if the backing Panth module is missing, removed,
+ * or disabled the slot renders empty rather than crashing.
+ */
+import BannerSliderStatic from "./banner-slider/BannerSliderStatic.astro";
+import TestimonialsSlider from "./testimonials/TestimonialsSlider.astro";
+import FaqAccordion from "./faq/FaqAccordion.astro";
+import NotificationBarSSR from "./notification-bar/NotificationBarSSR.astro";
+import CmsBlockSlot from "~/components/cms/CmsBlockSlot.astro";
+import ProductSlider from "./product-slider/ProductSlider.astro";
+
+type Props = { identifier: string; className?: string };
+const { identifier, className } = Astro.props;
+
+function parse(id: string): { kind: string; arg: string | null; limit: number | null } {
+  const [kindRaw, ...rest] = id.split(":");
+  const kind = (kindRaw ?? "").trim().toLowerCase();
+  const arg = rest.length > 0 ? rest.join(":").trim() : null;
+  const limit = arg && /^\d+$/.test(arg) ? Number.parseInt(arg, 10) : null;
+  return { kind, arg, limit };
+}
+
+const { kind, arg, limit } = parse(identifier);
+---
+{className ? <div class={className}>
+  {kind === "banner-slider" && arg && <BannerSliderStatic identifier={arg} />}
+  {kind === "testimonials" && <TestimonialsSlider limit={limit ?? 6} />}
+  {kind === "testimonials-grid" && <TestimonialsSlider limit={limit ?? 12} layout="grid" />}
+  {kind === "faq" && <FaqAccordion categoryUrlKey={arg} />}
+  {kind === "cms-block" && arg && <CmsBlockSlot identifier={arg} />}
+  {kind === "product-slider" && arg && <ProductSlider slug={arg} />}
+  {kind === "notification-bar" && <NotificationBarSSR />}
+</div> : <Fragment>
+  {kind === "banner-slider" && arg && <BannerSliderStatic identifier={arg} />}
+  {kind === "testimonials" && <TestimonialsSlider limit={limit ?? 6} />}
+  {kind === "testimonials-grid" && <TestimonialsSlider limit={limit ?? 12} layout="grid" />}
+  {kind === "faq" && <FaqAccordion categoryUrlKey={arg} />}
+  {kind === "cms-block" && arg && <CmsBlockSlot identifier={arg} />}
+  {kind === "product-slider" && arg && <ProductSlider slug={arg} />}
+  {kind === "notification-bar" && <NotificationBarSSR />}
+</Fragment>}

@@ -20,18 +20,30 @@ if (!orderNumber) {
 }
 
 let order;
+let loadError: string | null = null;
 try {
   order = await getCustomerOrder(token, orderNumber);
 } catch (err) {
-  console.warn("[order-view] load failed", {
-    orderNumber,
-    message: err instanceof Error ? err.message : String(err),
-  });
-  clearCustomerToken(Astro);
-  return Astro.redirect("/customer/account/login?flash=session_expired", 303);
+  const msg = err instanceof Error ? err.message : String(err);
+  console.warn("[order-view] load failed", { orderNumber, message: msg });
+  const lower = msg.toLowerCase();
+  // Only log the user out on genuine auth failures — token expired /
+  // invalid. Any other error (schema / network hiccup) should keep them
+  // logged in and show a friendly inline message instead.
+  const isAuthFailure =
+    lower.includes("unauthenticated") ||
+    lower.includes("unauthorized") ||
+    lower.includes("current customer isn't authorized") ||
+    lower.includes("not authorized") ||
+    lower.includes("token") && lower.includes("expired");
+  if (isAuthFailure) {
+    clearCustomerToken(Astro);
+    return Astro.redirect("/customer/account/login?flash=session_expired", 303);
+  }
+  loadError = "We couldn't load this order right now. Please try again in a moment.";
 }
 
-if (!order) {
+if (!order && !loadError) {
   return Astro.redirect("/sales/order/history?flash=order_not_found", 303);
 }
 
@@ -43,40 +55,50 @@ if (Astro.request.method === "POST") {
   const intent = String(form.get("intent") ?? "");
   if (intent === "reorder") {
     try {
-      const cartId = await getOrCreateCartId(Astro.cookies);
-      const items = (order.items ?? []).filter(
-        (i): i is OrderItemDetailT => i != null && typeof i.product_sku === "string",
-      );
-      let added = 0;
-      const errorMessages: string[] = [];
-      for (const item of items) {
-        const sku = item.product_sku;
-        if (!sku) continue;
-        const qty = Math.max(1, Math.floor(item.quantity_ordered ?? 1));
-        try {
-          const res = await addSkuToCart(cartId, sku, qty);
-          if (res.userErrors.length > 0) {
-            errorMessages.push(...res.userErrors.map((e) => e.message));
-          } else {
-            added++;
+      // Magento's native `reorderItems(orderNumber)` mutation handles every
+      // product type correctly — simple, configurable (child variant),
+      // bundle (selected options), grouped (associated items), downloadable
+      // (link UIDs). It runs under the customer's cart on the server side.
+      const doc = /* GraphQL */ `
+        mutation Reorder($n: String!) {
+          reorderItems(orderNumber: $n) {
+            cart { id total_quantity }
+            userInputErrors { code message path }
           }
-        } catch (err) {
-          console.warn("[order-view] reorder add failed", {
-            sku,
-            message: err instanceof Error ? err.message : String(err),
-          });
-          errorMessages.push(`Could not add ${sku} to cart.`);
         }
+      `;
+      const { authQuery } = await import("~/lib/queries-customer");
+      const raw = await authQuery<{
+        reorderItems: {
+          cart: { id: string; total_quantity: number } | null;
+          userInputErrors: Array<{ code: string; message: string }> | null;
+        };
+      }>(doc, { n: orderNumber }, token);
+      const result = raw.reorderItems;
+      const errors = result.userInputErrors ?? [];
+      const addedTotal = result.cart?.total_quantity ?? 0;
+
+      if (result.cart?.id) {
+        // Sync the cart cookie to the server-resolved cart id so the mini-
+        // cart and checkout all see the re-added items immediately.
+        Astro.cookies.set("m2r_cart_id", result.cart.id, {
+          httpOnly: false,
+          secure: true,
+          sameSite: "lax",
+          maxAge: 60 * 60 * 24 * 365,
+          path: "/",
+        });
       }
-      if (added === 0) {
-        actionMessage = errorMessages[0] ?? "None of the items could be added to your cart.";
+
+      if (addedTotal === 0) {
+        actionMessage = errors[0]?.message ?? "None of the items could be added to your cart.";
         actionVariant = "error";
-      } else if (errorMessages.length > 0) {
-        actionMessage = `Added ${added} item(s) to your cart; some items were unavailable.`;
-        actionVariant = "warning";
       } else {
-        actionMessage = `Added ${added} item(s) to your cart.`;
-        actionVariant = "success";
+        // Redirect to the cart page so the new cookie + fresh cart state
+        // hydrate the mini-cart and subtotal correctly. (The current page
+        // renders server-side with the pre-POST cookie value.)
+        const flash = errors.length > 0 ? "reordered_partial" : "reordered_ok";
+        return Astro.redirect(`/checkout/cart?flash=${flash}&count=${addedTotal}`, 303);
       }
     } catch (err) {
       console.warn("[order-view] reorder failed", {
@@ -114,12 +136,25 @@ function addrLines(addr: OrderAddressT | null | undefined): string[] {
   return lines;
 }
 
-const items = (order.items ?? []).filter(
-  (i): i is OrderItemDetailT => i != null,
-);
+const items = order
+  ? (order.items ?? []).filter((i): i is OrderItemDetailT => i != null)
+  : [];
 
-const tracking = (order.shipments ?? []).flatMap((s) => s.tracking ?? []);
+const tracking = order ? (order.shipments ?? []).flatMap((s) => s.tracking ?? []) : [];
 ---
+
+{loadError && !order && (
+  <AccountLayout title={`Order #${orderNumber}`} pageHeading={`Order #${orderNumber}`}>
+    <div class="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-800" role="alert">
+      <p class="font-semibold">Couldn't load this order</p>
+      <p class="mt-1">{loadError}</p>
+      <a href="/sales/order/history" class="mt-4 inline-flex items-center rounded-full bg-[var(--color-brand)] px-4 py-2 text-xs font-medium text-white hover:bg-[var(--color-brand-dark)]">
+        Back to orders
+      </a>
+    </div>
+  </AccountLayout>
+)}
+{order && (
 <AccountLayout
   title={`Order #${order.number}`}
   pageHeading={`Order #${order.number}`}
@@ -263,3 +298,4 @@ const tracking = (order.shipments ?? []).flatMap((s) => s.tracking ?? []);
     </section>
   )}
 </AccountLayout>
+)}

@@ -1,0 +1,57 @@
+---
+/**
+ * <SmartBadge /> — drop-in renderer for `Panth_SmartBadge` product badges.
+ *
+ * Accepts any product-shaped object (ProductCardT, CategoryProductCardT, or a
+ * minimal `{ smart_badges }` envelope) and renders nothing when there are no
+ * badges — safe to ship before the parent module is installed.
+ *
+ * Integration: see README at
+ *   src/app/code/Panth/SmartBadgeReact/README.md
+ * Do not edit ProductCard.astro directly; splice this component in inside the
+ * image container next to the existing SALE pill.
+ */
+import { extractSmartBadges } from "~/lib/queries-smart-badge";
+import { sanitizeHtml } from "~/lib/sanitize";
+
+interface Props {
+  product: unknown;
+  max?: number;
+}
+
+const { product, max = 3 } = Astro.props;
+
+const allBadges = extractSmartBadges(product);
+const badges = allBadges.slice(0, Math.max(0, max));
+
+function cleanLabel(v: string): string {
+  // Strip tags after sanitisation — labels should always be plain text.
+  return sanitizeHtml(v).replace(/<[^>]*>/g, "").trim();
+}
+---
+{badges.length > 0 && (
+  <div
+    class="pointer-events-none absolute top-2 right-2 z-10 flex flex-col items-end gap-1"
+    aria-label="Product badges"
+  >
+    {badges.map((b) => {
+      const label = cleanLabel(b.label);
+      if (!label) return null;
+      // Inline style is the safe path here because `color` is validated
+      // against an allowlist in `extractSmartBadges`.
+      const isCssVar = b.color.startsWith("var(");
+      const style = isCssVar
+        ? `background-color:${b.color}`
+        : `background-color:${b.color}`;
+      return (
+        <span
+          class="rounded-full px-2 py-1 text-[10px] font-semibold text-white shadow"
+          style={style}
+          title={label}
+        >
+          {label}
+        </span>
+      );
+    })}
+  </div>
+)}

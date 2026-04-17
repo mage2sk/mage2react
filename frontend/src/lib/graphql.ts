@@ -7,7 +7,7 @@ import { GraphQLClient } from "graphql-request";
 const isBrowser = typeof window !== "undefined";
 
 const endpoint = isBrowser
-  ? `${window.location.origin}/graphql`
+  ? `${window.location.origin}/api/graphql`
   : (import.meta.env.MAGENTO_GRAPHQL_URL ?? "http://mage2react.local/graphql");
 
 export const gql = new GraphQLClient(endpoint, {
