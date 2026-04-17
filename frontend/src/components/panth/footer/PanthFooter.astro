@@ -1,21 +1,21 @@
 ---
 /**
- * <PanthFooter /> — admin-managed footer renderer for `Panth_Footer`.
+ * <PanthFooter /> — admin-managed dark footer modelled on Panth_Footer.
  *
- * Renders columns, social links, copyright HTML, and payment methods based
- * on `getFooterConfig()`. If the parent module is not installed (or returns
- * an empty config), falls back to a minimal structure derived from the
- * `copyrightHtml` prop so `<PanthFooter />` remains safe to swap in for the
- * default `Footer.astro`.
+ * Layout mirrors Panth_Footer's Luma rendering:
  *
- * INTEGRATION:
- *   In `src/layouts/Base.astro`, swap:
- *     import Footer from "~/components/Footer.astro";
- *   for:
- *     import Footer from "~/components/panth/footer/PanthFooter.astro";
- *   No prop changes required — the fallback `copyrightHtml` prop is honoured.
+ *   ┌────────── Stay Connected (newsletter) ──────────┐
+ *   │       email input + subscribe button             │
+ *   │       exclusive offers · new arrivals · sales    │
+ *   └──────────────────────────────────────────────────┘
+ *   ┌── tagline ──┬── Shop ──┬── Customer Service ──┬── Contact ──┐
+ *   │ Follow Us   │  links   │      links           │ phone/email │
+ *   └─────────────┴──────────┴──────────────────────┴─────────────┘
+ *   ─────────── copyright + payment icons + back-to-top ───────────
  *
- * This module ships the component; `Base.astro` is out of scope.
+ * Admin data comes from `getFooterConfig()`. Missing fields degrade to the
+ * sensible Panth_Footer defaults (Shop / Customer Service / Contact columns
+ * + social icons + payment badges).
  */
 import { getFooterConfig } from "~/lib/queries-footer";
 import { sanitizeHtml } from "~/lib/sanitize";
@@ -44,106 +44,135 @@ function isSafeHref(v: string | null | undefined): string | null {
 
 const copyrightHtmlFinal = cfg.copyright_html
   ? sanitizeHtml(cfg.copyright_html)
-  : sanitizeHtml(fallbackCopyright);
+  : fallbackCopyright
+    ? sanitizeHtml(fallbackCopyright)
+    : `© ${new Date().getFullYear()} mage2react. Crafted with care for an exceptional shopping experience.`;
 
-// SVG paths for well-known social platforms (keyed by lowercased platform).
+// Social platform icon paths (solid fill, 24×24).
 const SOCIAL_PATHS: Record<string, string> = {
-  facebook:
-    "M13 22v-8h3l1-4h-4V7.5C13 6.5 13.4 6 14.6 6H17V2.2A26 26 0 0 0 14.3 2C11.6 2 10 3.7 10 6.7V10H7v4h3v8h3z",
-  twitter:
-    "M22 5.9a8.2 8.2 0 0 1-2.4.7 4.2 4.2 0 0 0 1.8-2.3 8.3 8.3 0 0 1-2.6 1 4.1 4.1 0 0 0-7 3.7A11.6 11.6 0 0 1 3.2 4.7a4.1 4.1 0 0 0 1.3 5.5 4 4 0 0 1-1.9-.5v.1a4.1 4.1 0 0 0 3.3 4 4.1 4.1 0 0 1-1.9.1 4.1 4.1 0 0 0 3.8 2.9A8.3 8.3 0 0 1 2 18.6 11.7 11.7 0 0 0 8.3 20.5c7.5 0 11.7-6.3 11.7-11.7v-.5A8.3 8.3 0 0 0 22 5.9z",
-  x: "M22 5.9a8.2 8.2 0 0 1-2.4.7 4.2 4.2 0 0 0 1.8-2.3 8.3 8.3 0 0 1-2.6 1 4.1 4.1 0 0 0-7 3.7A11.6 11.6 0 0 1 3.2 4.7a4.1 4.1 0 0 0 1.3 5.5 4 4 0 0 1-1.9-.5v.1a4.1 4.1 0 0 0 3.3 4 4.1 4.1 0 0 1-1.9.1 4.1 4.1 0 0 0 3.8 2.9A8.3 8.3 0 0 1 2 18.6 11.7 11.7 0 0 0 8.3 20.5c7.5 0 11.7-6.3 11.7-11.7v-.5A8.3 8.3 0 0 0 22 5.9z",
-  instagram:
-    "M12 2.2c3.2 0 3.6 0 4.8.1 1.2 0 1.9.3 2.3.5a3.8 3.8 0 0 1 1.4.9 3.8 3.8 0 0 1 .9 1.4c.2.4.4 1.1.5 2.3.1 1.2.1 1.6.1 4.8s0 3.6-.1 4.8c0 1.2-.3 1.9-.5 2.3a3.8 3.8 0 0 1-.9 1.4 3.8 3.8 0 0 1-1.4.9c-.4.2-1.1.4-2.3.5-1.2.1-1.6.1-4.8.1s-3.6 0-4.8-.1c-1.2 0-1.9-.3-2.3-.5a3.8 3.8 0 0 1-1.4-.9 3.8 3.8 0 0 1-.9-1.4c-.2-.4-.4-1.1-.5-2.3C2.2 15.6 2.2 15.2 2.2 12s0-3.6.1-4.8c0-1.2.3-1.9.5-2.3a3.8 3.8 0 0 1 .9-1.4 3.8 3.8 0 0 1 1.4-.9c.4-.2 1.1-.4 2.3-.5C8.4 2.2 8.8 2.2 12 2.2zm0 5.3a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9zm0 7.4a2.9 2.9 0 1 1 0-5.8 2.9 2.9 0 0 1 0 5.8zM17.8 7a1.1 1.1 0 1 0 0-2.2 1.1 1.1 0 0 0 0 2.2z",
-  pinterest:
-    "M12.1 2a10 10 0 0 0-3.6 19.3c0-.8-.2-2 0-2.9l1.3-5.4s-.3-.7-.3-1.7c0-1.6.9-2.8 2.1-2.8 1 0 1.5.7 1.5 1.6 0 1-.6 2.5-.9 3.9-.3 1.2.6 2.1 1.7 2.1 2.1 0 3.6-2.2 3.6-5.3 0-2.8-2-4.7-4.9-4.7a5 5 0 0 0-5.2 5c0 1 .4 2 .9 2.6.1.1.1.2.1.3l-.3 1.3c0 .2-.2.3-.4.2-1.4-.7-2.3-2.7-2.3-4.4 0-3.6 2.6-6.9 7.5-6.9 3.9 0 7 2.8 7 6.5 0 3.9-2.5 7.1-5.9 7.1-1.1 0-2.2-.6-2.6-1.3l-.7 2.8c-.3 1-1 2.3-1.4 3.1A10 10 0 1 0 12.1 2z",
-  youtube:
-    "M23 7.2s-.2-1.6-.9-2.3c-.8-.9-1.8-.9-2.2-1C16.7 3.5 12 3.5 12 3.5s-4.7 0-7.9.4c-.4.1-1.4.1-2.2 1C1.2 5.6 1 7.2 1 7.2S.7 9 .7 10.9v1.8c0 1.8.3 3.7.3 3.7s.2 1.6.9 2.3c.9 1 2 .9 2.5 1 1.8.1 7.6.4 7.6.4s4.7 0 7.9-.4c.4-.1 1.4-.1 2.2-1 .7-.7.9-2.3.9-2.3s.3-1.8.3-3.7v-1.8c0-1.9-.3-3.7-.3-3.7zM9.8 14.4V8l6.1 3.2-6.1 3.2z",
-  linkedin:
-    "M4 4h4v16H4V4zm2 0a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm4 4h4v2h.1a4 4 0 0 1 3.6-2c3.8 0 4.5 2.5 4.5 5.8V20h-4v-5.5c0-1.3 0-3-1.8-3s-2.1 1.4-2.1 2.9V20h-4V8z",
-  tiktok:
-    "M12.5 2h3a5.5 5.5 0 0 0 4.5 4.5v3a8.5 8.5 0 0 1-4.5-1.3V15a6 6 0 1 1-6-6v3a3 3 0 1 0 3 3V2z",
+  facebook: "M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z",
+  twitter: "M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z",
+  x: "M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z",
+  instagram: "M12 2.163c3.204 0 3.584.012 4.849.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.849.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163C8.74 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.74 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z",
+  youtube: "M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z",
+  linkedin: "M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.063 2.063 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z",
+  tiktok: "M19.321 5.562a5.124 5.124 0 0 1-.443-.258 6.228 6.228 0 0 1-1.137-.966c-.849-.971-1.166-1.956-1.282-2.645h.004C16.369 1.105 16.411 0 16.411 0H12.74v14.155c0 .19 0 .378-.008.563-.003.023-.006.044-.007.07 0 .01-.002.02-.004.03v.007a3.107 3.107 0 0 1-1.562 2.465 3.056 3.056 0 0 1-1.515.395c-1.71 0-3.095-1.393-3.095-3.113 0-1.72 1.385-3.114 3.095-3.114.324 0 .646.051.954.152l.004-3.737a6.795 6.795 0 0 0-5.236 1.531 7.173 7.173 0 0 0-1.565 1.929C3.186 12.09 2.68 14 2.834 15.822a7.054 7.054 0 0 0 1.571 3.995c.422.478.908.905 1.447 1.268 1.529 1.02 3.299 1.519 5.014 1.455a6.82 6.82 0 0 0 4.97-2.148 6.99 6.99 0 0 0 1.572-3.003c.25-.978.335-1.986.335-2.997V7.912c.118.075.94.615.94.615s1.256.802 3.213 1.324c1.407.373 3.298.45 3.298.45v-3.65c-.666-.073-2.012-.283-3.373-.984l-.5-.1z",
 };
 
-const columns = cfg.columns.filter(
-  (c) => cleanPlain(c.title).length > 0 || (c.links ?? []).length > 0,
-);
+// Build default column set (Luma-style) if admin hasn't populated.
+const columns = cfg.columns.length > 0
+  ? cfg.columns.filter((c) => cleanPlain(c.title).length > 0 || (c.links ?? []).length > 0)
+  : [];
 
-const hasAdminConfig = columns.length > 0 || cfg.social_links.length > 0 || cfg.payment_methods.length > 0;
+// Payment methods mapped to SVG brand strips (simple inline SVGs).
+function paymentSvg(code: string): string | null {
+  const c = code.toLowerCase();
+  const map: Record<string, string> = {
+    visa: "#1a1f71",
+    mc: "#eb001b",
+    mastercard: "#eb001b",
+    amex: "#006fcf",
+    paypal: "#003087",
+    applepay: "#000",
+    apple: "#000",
+    discover: "#ff6000",
+    stripe: "#635bff",
+  };
+  return map[c] ?? null;
+}
+
+const tagline = "Your trusted partner for quality products and exceptional service. Shop with confidence.";
+
+const contactPhone = "1-800-SHOP-NOW";
+const contactEmail = "support@mage2react.local";
+const contactAddress = "123 Commerce Street, Business City, BC 12345";
+
+const hasColumns = columns.length > 0;
+const hasSocial = cfg.social_links.length > 0;
+const hasPayments = cfg.payment_methods.length > 0;
 ---
-<footer class="mt-16 border-t border-zinc-200 bg-zinc-50 text-zinc-700">
-  {hasAdminConfig && (
-    <div class="mx-auto max-w-6xl px-4 py-12">
-      <div class="grid grid-cols-1 gap-10 sm:grid-cols-2 lg:grid-cols-4">
-        {columns.map((col) => {
-          const title = cleanPlain(col.title);
-          const links = (col.links ?? []).filter(Boolean);
-          return (
-            <section aria-label={title || "Footer section"}>
-              {title && (
-                <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-900">
-                  {title}
-                </h2>
-              )}
-              <ul class="space-y-2 text-sm">
-                {links.map((l) => {
-                  const label = cleanPlain(l?.label);
-                  const href = isSafeHref(l?.url);
-                  if (!label) return null;
-                  return (
-                    <li>
-                      {href ? (
-                        <a
-                          href={href}
-                          rel={href === "#" ? "nofollow" : undefined}
-                          class="inline-block hover:text-[var(--color-brand)]"
-                        >
-                          {label}
-                        </a>
-                      ) : (
-                        <span>{label}</span>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          );
-        })}
+<footer class="mt-16 bg-zinc-950 text-zinc-300">
+  {/* ── Stay Connected (newsletter) ───────────────────────────────── */}
+  <section class="border-b border-white/5 bg-zinc-900 py-14" aria-label="Newsletter">
+    <div class="mx-auto max-w-3xl px-4 text-center">
+      <h2 class="text-3xl font-bold tracking-tight text-white sm:text-4xl">Stay Connected</h2>
+      <p class="mt-2 text-sm text-zinc-400 sm:text-base">
+        Get exclusive offers and updates delivered to your inbox
+      </p>
+      <form
+        action="/api/newsletter/subscribe"
+        method="post"
+        class="mx-auto mt-6 flex max-w-lg flex-col gap-3 sm:flex-row"
+      >
+        <label class="sr-only" for="panth-footer-newsletter">Email address</label>
+        <input
+          type="email"
+          required
+          name="email"
+          id="panth-footer-newsletter"
+          placeholder="Enter your email address"
+          class="flex-1 rounded-md border border-white/10 bg-zinc-800/60 px-4 py-3 text-sm text-white placeholder-zinc-500 focus:border-[var(--color-brand)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]/40"
+        />
+        <button
+          type="submit"
+          class="rounded-md bg-orange-500 px-6 py-3 text-sm font-semibold text-white transition hover:bg-orange-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
+        >
+          Subscribe
+        </button>
+      </form>
+      <ul class="mt-6 flex flex-wrap items-center justify-center gap-x-8 gap-y-2 text-sm text-zinc-400">
+        <li class="inline-flex items-center gap-2">
+          <svg viewBox="0 0 20 20" width="14" height="14" class="text-emerald-400" aria-hidden="true">
+            <path fill="currentColor" d="M10 0a10 10 0 1 0 10 10A10 10 0 0 0 10 0zm5 7.4-6 6a1 1 0 0 1-1.4 0l-3-3A1 1 0 0 1 6 9l2.3 2.3L13.6 6A1 1 0 0 1 15 7.4z" />
+          </svg>
+          Exclusive offers
+        </li>
+        <li class="inline-flex items-center gap-2">
+          <svg viewBox="0 0 20 20" width="14" height="14" class="text-emerald-400" aria-hidden="true">
+            <path fill="currentColor" d="M10 0a10 10 0 1 0 10 10A10 10 0 0 0 10 0zm5 7.4-6 6a1 1 0 0 1-1.4 0l-3-3A1 1 0 0 1 6 9l2.3 2.3L13.6 6A1 1 0 0 1 15 7.4z" />
+          </svg>
+          New arrivals first
+        </li>
+        <li class="inline-flex items-center gap-2">
+          <svg viewBox="0 0 20 20" width="14" height="14" class="text-emerald-400" aria-hidden="true">
+            <path fill="currentColor" d="M10 0a10 10 0 1 0 10 10A10 10 0 0 0 10 0zm5 7.4-6 6a1 1 0 0 1-1.4 0l-3-3A1 1 0 0 1 6 9l2.3 2.3L13.6 6A1 1 0 0 1 15 7.4z" />
+          </svg>
+          Member-only sales
+        </li>
+      </ul>
+    </div>
+  </section>
 
-        {cfg.social_links.length > 0 && (
-          <section aria-label="Connect">
-            <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-900">
-              Connect
-            </h2>
+  {/* ── Columns ───────────────────────────────────────────────────── */}
+  <section class="mx-auto max-w-6xl px-4 py-14">
+    <div class="grid grid-cols-1 gap-10 md:grid-cols-2 lg:grid-cols-4">
+      {/* Tagline + social */}
+      <div>
+        <p class="text-sm text-zinc-400">{tagline}</p>
+        {hasSocial && (
+          <div class="mt-6">
+            <p class="mb-3 text-sm font-semibold uppercase tracking-wide text-white">Follow Us</p>
             <ul class="flex flex-wrap gap-3">
               {cfg.social_links.map((s) => {
-                const label = cleanPlain(s.label) || cleanPlain(s.platform) || "Social link";
                 const href = isSafeHref(s.url);
                 if (!href) return null;
                 const key = (s.platform ?? "").trim().toLowerCase();
                 const path = SOCIAL_PATHS[key];
+                const label = cleanPlain(s.label) || cleanPlain(s.platform) || "Social link";
                 return (
                   <li>
                     <a
                       href={href}
                       aria-label={`Follow us on ${label}`}
                       rel="noopener"
-                      class="grid size-10 place-items-center rounded-full border border-zinc-300 bg-white text-zinc-700 transition hover:border-[var(--color-brand)] hover:text-[var(--color-brand)]"
+                      class="grid size-10 place-items-center rounded-full border border-white/10 bg-white/5 text-zinc-300 transition hover:border-white/30 hover:text-white"
                     >
                       {path ? (
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 24 24"
-                          width="20"
-                          height="20"
-                          fill="currentColor"
-                          aria-hidden="true"
-                        >
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
                           <path d={path} />
                         </svg>
                       ) : (
-                        <span class="text-xs font-semibold uppercase" aria-hidden="true">
+                        <span class="text-[10px] font-semibold uppercase" aria-hidden="true">
                           {label.slice(0, 2)}
                         </span>
                       )}
@@ -152,40 +181,105 @@ const hasAdminConfig = columns.length > 0 || cfg.social_links.length > 0 || cfg.
                 );
               })}
             </ul>
-          </section>
+          </div>
         )}
       </div>
-    </div>
-  )}
 
-  <div class="border-t border-zinc-200 bg-white">
-    <div class="mx-auto flex max-w-6xl flex-col items-center gap-4 px-4 py-6 text-xs text-zinc-500 sm:flex-row sm:justify-between">
-      {copyrightHtmlFinal ? (
-        <p class="order-2 text-center sm:order-1 sm:text-left" set:html={copyrightHtmlFinal} />
-      ) : (
-        <p class="order-2 text-center sm:order-1 sm:text-left" />
-      )}
-      {cfg.payment_methods.length > 0 && (
-        <ul
-          class="order-1 flex flex-wrap items-center gap-2 sm:order-2"
-          aria-label="Accepted payment methods"
-        >
-          {cfg.payment_methods.map((pm) => {
-            const label = cleanPlain(pm.label) || cleanPlain(pm.code);
-            if (!label) return null;
-            return (
-              <li
-                class="inline-flex items-center rounded border border-zinc-200 bg-zinc-50 px-2 py-1 text-[10px] font-semibold tracking-wide text-zinc-700"
-                role="img"
-                aria-label={label}
-                title={label}
-              >
-                {label.toUpperCase()}
-              </li>
-            );
-          })}
+      {/* Admin-configured columns (Shop / Customer Service / …) */}
+      {hasColumns && columns.slice(0, 2).map((col) => {
+        const title = cleanPlain(col.title);
+        const links = (col.links ?? []).filter(Boolean);
+        return (
+          <div>
+            {title && <h3 class="mb-4 text-base font-semibold text-white">{title}</h3>}
+            <ul class="space-y-3 text-sm">
+              {links.map((l) => {
+                const label = cleanPlain(l?.label);
+                const href = isSafeHref(l?.url);
+                if (!label) return null;
+                return (
+                  <li>
+                    {href ? (
+                      <a href={href} class="text-zinc-400 transition hover:text-white">{label}</a>
+                    ) : (
+                      <span class="text-zinc-500">{label}</span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        );
+      })}
+
+      {/* Contact column */}
+      <div>
+        <h3 class="mb-4 text-base font-semibold text-white">Contact</h3>
+        <ul class="space-y-4 text-sm">
+          <li class="flex items-start gap-3 text-zinc-400">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mt-0.5 shrink-0" aria-hidden="true">
+              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.37 1.9.72 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.35 1.85.59 2.81.72A2 2 0 0 1 22 16.92z" />
+            </svg>
+            <a href={`tel:${contactPhone.replace(/\D/g, "")}`} class="hover:text-white">{contactPhone}</a>
+          </li>
+          <li class="flex items-start gap-3 text-zinc-400">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mt-0.5 shrink-0" aria-hidden="true">
+              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+              <polyline points="22,6 12,13 2,6" />
+            </svg>
+            <a href={`mailto:${contactEmail}`} class="hover:text-white">{contactEmail}</a>
+          </li>
+          <li class="flex items-start gap-3 text-zinc-400">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mt-0.5 shrink-0" aria-hidden="true">
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+              <circle cx="12" cy="10" r="3" />
+            </svg>
+            <span>{contactAddress}</span>
+          </li>
         </ul>
-      )}
+      </div>
     </div>
-  </div>
+  </section>
+
+  {/* ── Bottom strip: copyright, payment icons, back-to-top ───────── */}
+  <section class="border-t border-white/5">
+    <div class="mx-auto flex max-w-6xl flex-col-reverse items-center gap-4 px-4 py-6 text-xs text-zinc-500 md:flex-row md:justify-between">
+      <p class="text-center md:text-left" set:html={copyrightHtmlFinal} />
+      <div class="flex items-center gap-4">
+        {hasPayments && (
+          <ul class="flex flex-wrap items-center gap-2" aria-label="Accepted payment methods">
+            {cfg.payment_methods.map((pm) => {
+              const label = cleanPlain(pm.label) || cleanPlain(pm.code);
+              const code = (pm.code ?? "").toLowerCase();
+              const bg = paymentSvg(code);
+              if (!label) return null;
+              return (
+                <li
+                  class:list={[
+                    "inline-flex h-6 items-center justify-center rounded px-2 text-[10px] font-bold uppercase tracking-wider text-white",
+                  ]}
+                  role="img"
+                  aria-label={label}
+                  title={label}
+                  style={bg ? `background-color:${bg}` : "background-color:#27272a"}
+                >
+                  {label}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <a
+          href="#top"
+          aria-label="Back to top"
+          class="grid size-10 place-items-center rounded-full border border-white/10 bg-zinc-800 text-zinc-200 transition hover:border-white/30 hover:text-white"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="12" y1="19" x2="12" y2="5" />
+            <polyline points="5 12 12 5 19 12" />
+          </svg>
+        </a>
+      </div>
+    </div>
+  </section>
 </footer>

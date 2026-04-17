@@ -77,54 +77,33 @@ const DEFAULT_CONFIG: FooterConfig = {
     {
       title: "Shop",
       links: [
-        { label: "What's New", url: "/what-is-new.html" },
-        { label: "Women", url: "/women.html" },
-        { label: "Men", url: "/men.html" },
-        { label: "Gear", url: "/gear.html" },
+        { label: "New Arrivals", url: "/what-is-new.html" },
+        { label: "Best Sellers", url: "/women.html" },
         { label: "Sale", url: "/sale.html" },
+        { label: "Gift Cards", url: "/gift-card" },
       ],
     },
     {
-      title: "Help",
+      title: "Customer Service",
       links: [
-        { label: "FAQ", url: "/faq" },
-        { label: "Shipping & Returns", url: "/shipping-information" },
         { label: "Contact Us", url: "/contact" },
-        { label: "Track Order", url: "/customer/account" },
-      ],
-    },
-    {
-      title: "About",
-      links: [
-        { label: "About Us", url: "/about-us" },
-        { label: "Customer Service", url: "/customer-service" },
-        { label: "Privacy Policy", url: "/privacy-policy" },
-        { label: "Terms", url: "/terms-of-service" },
-      ],
-    },
-    {
-      title: "Account",
-      links: [
-        { label: "My Account", url: "/customer/account" },
-        { label: "Wishlist", url: "/wishlist" },
-        { label: "Orders & Returns", url: "/customer/account" },
-        { label: "Compare Products", url: "/compare" },
+        { label: "Shipping Info", url: "/shipping-information" },
+        { label: "Returns", url: "/returns" },
+        { label: "FAQ", url: "/faq" },
       ],
     },
   ],
   social_links: [
     { platform: "facebook", url: "https://facebook.com/", label: "Facebook" },
-    { platform: "instagram", url: "https://instagram.com/", label: "Instagram" },
     { platform: "x", url: "https://x.com/", label: "X (Twitter)" },
-    { platform: "youtube", url: "https://youtube.com/", label: "YouTube" },
+    { platform: "instagram", url: "https://instagram.com/", label: "Instagram" },
   ],
   copyright_html: "",
   payment_methods: [
     { label: "Visa", code: "visa" },
-    { label: "Mastercard", code: "mc" },
-    { label: "Amex", code: "amex" },
+    { label: "MC", code: "mc" },
     { label: "PayPal", code: "paypal" },
-    { label: "Apple Pay", code: "applepay" },
+    { label: "Amex", code: "amex" },
   ],
 };
 

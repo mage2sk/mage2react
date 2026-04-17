@@ -297,9 +297,17 @@ if (finalResolved.type === "CATEGORY" && finalResolved.uid) {
   const BASE_URL = import.meta.env.PUBLIC_SITE_URL || "https://mage2react.local";
   const MEDIA_BASE = (import.meta.env.PUBLIC_MEDIA_URL ?? `${BASE_URL}/media`).replace(/\/+$/, "");
   function cleanMagentoDirectives(html: string): string {
-    // Strip unresolved `{{widget type="..."}}` directives — they expand to
-    // product HTML in Luma but we render products via our own slider below.
-    let out = html.replace(/\{\{widget[\s\S]*?\}\}/gi, "");
+    // Drop the Luma product-list widget + its heading. GraphQL expands the
+    // `{{widget type="Magento\CatalogWidget\...ProductsList"}}` directive
+    // into Luma-themed HTML that doesn't match our card styles, so we render
+    // our own product slider below instead.
+    let out = html.replace(
+      /<div class="content-heading"[\s\S]*$/i,
+      "",
+    );
+    // Strip any remaining unresolved directives just in case.
+    out = out.replace(/\{\{widget[\s\S]*?\}\}/gi, "");
+    out = out.replace(/<div class="widget[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/gi, "");
     // Resolve Magento placeholder directives that survived into the content.
     out = out.replace(/\{\{store\s+url=""\s*\}\}/gi, `${BASE_URL}/`);
     out = out.replace(/\{\{store\s+url="([^"]*)"\s*\}\}/gi, (_m, p) => `${BASE_URL}/${p}`);
