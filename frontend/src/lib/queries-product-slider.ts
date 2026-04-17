@@ -1,23 +1,20 @@
 import { z } from "zod";
 import { query } from "./graphql";
+import { panthQuery } from "./panth-db";
 
 /**
  * queries-product-slider.ts
  *
- * Typed helper for `Panth_ProductSlider` (`mage2kishan/module-product-slider`).
- * The parent module is expected to expose a `panthProductSlider(slug)` query
- * returning `{ title, subtitle, items: [...ProductCardLike] }`. Every field is
- * `.nullable().optional()` — we cannot verify the upstream schema, so the
- * function always `safeParse`s and returns `null` on any mismatch.
+ * Hybrid resolver for `Panth_ProductSlider`:
+ *   1. Read slider config (identifier, title, filters, display options) from
+ *      the `panth_product_slider` MySQL table.
+ *   2. Expand the configured product SKUs via Magento's native
+ *      `products(filter: {sku: {in: [...]}})` GraphQL so the card has
+ *      current price, stock, and media.
  *
- * Callers:
- *   const slider = await getProductSlider("bestsellers");
- *   if (!slider) return null; // parent module missing or empty slider
+ * Never throws. Returns `null` when the slider doesn't exist or every
+ * configured SKU fails to resolve to a product.
  */
-
-/* -------------------------------------------------------------------------- */
-/* Zod schemas                                                                */
-/* -------------------------------------------------------------------------- */
 
 const Money = z.object({
   value: z.number().nullable().optional(),
@@ -51,12 +48,9 @@ const ProductCardLike = z.object({
 });
 export type ProductCardLike = z.infer<typeof ProductCardLike>;
 
-const SliderEnvelope = z.object({
-  panthProductSlider: z
+const ProductsEnvelope = z.object({
+  products: z
     .object({
-      slug: z.string().nullable().optional(),
-      title: z.string().nullable().optional(),
-      subtitle: z.string().nullable().optional(),
       items: z.array(ProductCardLike).nullable().optional(),
     })
     .nullable()
@@ -68,47 +62,53 @@ export type ProductSliderResult = {
   title: string;
   subtitle: string;
   items: ProductCardLike[];
+  autoplay: boolean;
+  autoplayMs: number;
+  columnsDesktop: number;
 };
 
-/* -------------------------------------------------------------------------- */
-/* One-shot warning                                                           */
-/* -------------------------------------------------------------------------- */
-
-let warnedMissing = false;
-function logSchemaMiss(err: unknown): void {
-  if (warnedMissing) return;
-  warnedMissing = true;
-  const msg = err instanceof Error ? err.message : String(err);
-  if (/Cannot query field|Unknown type|not exist/i.test(msg)) {
-    console.warn(
-      "[panth-product-slider] panthProductSlider field missing — install/enable Panth_ProductSlider.",
-    );
-  } else {
-    console.warn("[panth-product-slider] query failed:", msg);
-  }
+interface SliderConfigRow {
+  identifier: string;
+  title: string;
+  description: string | null;
+  product_skus: string | null;
+  category_ids: string | null;
+  page_size: number;
+  columns_desktop: number;
+  enable_autoplay: number;
+  autoplay_interval: number;
+  sort_by: string;
+  sort_direction: string;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Public API                                                                 */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Fetch a named product slider. Returns `null` when the backend module is not
- * installed or the slider is empty / undefined. Never throws.
- *
- * @param slug   The admin-defined slug (e.g. "bestsellers", "home-featured").
- */
 export async function getProductSlider(
   slug: string,
 ): Promise<ProductSliderResult | null> {
   if (!slug || typeof slug !== "string") return null;
 
+  const rows = await panthQuery<SliderConfigRow>(
+    `SELECT identifier, title, description, product_skus, category_ids,
+            page_size, columns_desktop, enable_autoplay, autoplay_interval,
+            sort_by, sort_direction
+       FROM panth_product_slider
+      WHERE identifier = ? AND is_active = 1
+      LIMIT 1`,
+    [slug],
+  );
+  const cfg = rows[0];
+  if (!cfg) return null;
+
+  const skus = (cfg.product_skus ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+    .slice(0, cfg.page_size || 8);
+
+  if (skus.length === 0) return null;
+
   const doc = /* GraphQL */ `
-    query PanthProductSlider($slug: String!) {
-      panthProductSlider(slug: $slug) {
-        slug
-        title
-        subtitle
+    query PanthProductsBySku($skus: [String]!) {
+      products(filter: { sku: { in: $skus } }, pageSize: 50) {
         items {
           uid
           __typename
@@ -128,24 +128,37 @@ export async function getProductSlider(
     }
   `;
 
+  let items: ProductCardLike[] = [];
   try {
-    const raw = await query<unknown>(doc, { slug });
-    const parsed = SliderEnvelope.safeParse(raw);
-    if (!parsed.success) return null;
-    const env = parsed.data.panthProductSlider;
-    if (!env) return null;
-    const items = (env.items ?? []).filter(
-      (p): p is ProductCardLike => p !== null && p !== undefined,
-    );
-    if (items.length === 0) return null;
-    return {
-      slug: env.slug ?? slug,
-      title: (env.title ?? "").trim(),
-      subtitle: (env.subtitle ?? "").trim(),
-      items,
-    };
-  } catch (err) {
-    logSchemaMiss(err);
-    return null;
+    const raw = await query<unknown>(doc, { skus });
+    const parsed = ProductsEnvelope.safeParse(raw);
+    if (parsed.success) {
+      const fetched = (parsed.data.products?.items ?? []).filter(
+        (p): p is ProductCardLike => p !== null && p !== undefined,
+      );
+      // Preserve the admin-configured order of SKUs (GraphQL returns by
+      // entity_id, not by input order).
+      const bySku = new Map<string, ProductCardLike>();
+      for (const p of fetched) {
+        if (p.sku) bySku.set(p.sku, p);
+      }
+      items = skus
+        .map((s) => bySku.get(s))
+        .filter((p): p is ProductCardLike => p !== undefined);
+    }
+  } catch {
+    /* non-fatal — fall through to empty */
   }
+
+  if (items.length === 0) return null;
+
+  return {
+    slug: cfg.identifier,
+    title: cfg.title,
+    subtitle: (cfg.description ?? "").trim(),
+    items,
+    autoplay: cfg.enable_autoplay === 1,
+    autoplayMs: Math.max(1500, cfg.autoplay_interval || 4000),
+    columnsDesktop: Math.max(1, Math.min(6, cfg.columns_desktop || 4)),
+  };
 }

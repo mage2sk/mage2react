@@ -12,39 +12,32 @@
  * rich-result signals).
  */
 import Layout from "~/layouts/Base.astro";
-import FaqAccordion from "~/components/panth/faq/FaqAccordion.astro";
+import FaqSearch from "~/components/panth/faq/FaqSearch.tsx";
 import { getFaqCategories, getFaqItems } from "~/lib/queries-faq";
 import { sanitizeHtml } from "~/lib/sanitize";
 import { faqPageLd } from "~/lib/jsonld";
 
 export const prerender = false;
 
-const PAGE_SIZE = 24;
+const PAGE_SIZE = 100;
 
 const url = Astro.url;
-const rawPage = url.searchParams.get("page");
-const parsedPage = rawPage ? Number.parseInt(rawPage, 10) : 1;
-const currentPage = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
-
 const rawCategory = url.searchParams.get("category");
 const categoryId = rawCategory && rawCategory.trim().length > 0 ? rawCategory.trim() : null;
 
-const [categories, { items, totalPages }] = await Promise.all([
+const [categories, { items }] = await Promise.all([
   getFaqCategories(),
-  getFaqItems(categoryId, currentPage, PAGE_SIZE),
+  getFaqItems(categoryId, 1, PAGE_SIZE),
 ]);
 
 const hasItems = items.length > 0;
 const hasCategories = categories.length > 0;
-const hasPrev = currentPage > 1;
-const hasNext = currentPage < totalPages;
 
 function plainQ(v: string): string {
   return sanitizeHtml(v).replace(/<[^>]*>/g, "").trim();
 }
 
 function plainA(v: string): string {
-  // JSON-LD Answer.text must be plain; collapse HTML and whitespace.
   return sanitizeHtml(v).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
@@ -104,43 +97,19 @@ const jsonLd = hasItems
     )}
 
     {hasItems ? (
-      <FaqAccordion items={items.map((it) => ({ question: it.question, answer: it.answer }))} />
+      <FaqSearch
+        client:load
+        openFirst
+        items={items.map((it) => ({
+          id: it.id,
+          question: it.question,
+          answer: sanitizeHtml(it.answer),
+        }))}
+      />
     ) : (
       <p class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-center text-sm text-[var(--color-fg-muted)]">
         No FAQs yet. Check back soon.
       </p>
-    )}
-
-    {totalPages > 1 && (
-      <nav aria-label="FAQ pagination" class="flex items-center justify-center gap-3 pt-2">
-        <a
-          href={hasPrev ? buildHref({ page: String(currentPage - 1) }) : "#"}
-          aria-disabled={!hasPrev}
-          class:list={[
-            "rounded-md border border-[var(--color-border)] px-3 py-1 text-sm",
-            hasPrev
-              ? "bg-[var(--color-surface)] text-[var(--color-fg)] hover:border-[var(--color-brand)]"
-              : "pointer-events-none bg-[var(--color-muted)] text-[var(--color-fg-muted)]",
-          ]}
-        >
-          Previous
-        </a>
-        <span class="text-sm text-[var(--color-fg-muted)]">
-          Page {currentPage} of {totalPages}
-        </span>
-        <a
-          href={hasNext ? buildHref({ page: String(currentPage + 1) }) : "#"}
-          aria-disabled={!hasNext}
-          class:list={[
-            "rounded-md border border-[var(--color-border)] px-3 py-1 text-sm",
-            hasNext
-              ? "bg-[var(--color-surface)] text-[var(--color-fg)] hover:border-[var(--color-brand)]"
-              : "pointer-events-none bg-[var(--color-muted)] text-[var(--color-fg-muted)]",
-          ]}
-        >
-          Next
-        </a>
-      </nav>
     )}
   </main>
 

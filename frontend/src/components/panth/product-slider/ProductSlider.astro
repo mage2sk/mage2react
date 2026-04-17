@@ -1,31 +1,19 @@
 ---
 /**
- * <ProductSlider /> — drop-in product carousel.
+ * <ProductSlider /> — SSR wrapper around the React `ProductCarousel` island.
  *
- * Data comes from `getProductSlider(slug)` (Panth_ProductSlider). Multiple
- * sliders per page are supported — each instance gets a unique track id so
- * the arrow island can find it without collisions.
- *
- * Rendering: a CSS scroll-snap horizontal strip with zero JS by default. The
- * inline SVG arrows are enhanced by a tiny `client:idle` island (`SliderArrows`)
- * that scrolls the track by one card width. Keyboard accessible: the track is
- * focusable (`tabindex="0"`), and native left/right arrow keys scroll via
- * the built-in keyboard scrolling behaviour of the scrollable element.
- *
- * Renders nothing when the backend module is not installed or the slider is
- * empty — safe to ship before the backend lands.
+ * Reads slider config from `panth_product_slider` (via queries-product-slider)
+ * and resolves product data through Magento GraphQL. Renders nothing when
+ * the slug isn't configured or every SKU fails to resolve.
  */
 import { getProductSlider, type ProductCardLike } from "~/lib/queries-product-slider";
 import { formatMoney } from "~/lib/money";
 import { sanitizeHtml } from "~/lib/sanitize";
-import SliderArrows from "./SliderArrows.tsx";
+import ProductCarousel from "./ProductCarousel.tsx";
 
 interface Props {
-  /** Admin-defined slider slug, e.g. "bestsellers". */
   slug: string;
-  /** Optional heading override; falls back to slider.title. */
   heading?: string;
-  /** Optional subtitle override; falls back to slider.subtitle. */
   subheading?: string;
 }
 
@@ -33,113 +21,43 @@ const { slug, heading, subheading } = Astro.props;
 
 const slider = await getProductSlider(slug);
 
-// Deterministic id — no Math.random / Date.now — avoids collisions when the
-// same slug is placed twice by using a stable suffix from Astro's build.
-const trackId = `panth-slider-${slug.replace(/[^a-z0-9-]/gi, "-")}`;
+function clean(v: string | null | undefined): string {
+  if (!v) return "";
+  return sanitizeHtml(v).replace(/<[^>]*>/g, "").trim();
+}
 
 function hrefFor(p: ProductCardLike): string {
   if (!p.url_key) return "#";
   return `/${p.url_key}${p.url_suffix ?? ".html"}`;
 }
 
-function finalPrice(p: ProductCardLike): { value: number | null; currency: string | null } {
+const products = (slider?.items ?? []).map((p) => {
   const fp = p.price_range?.minimum_price?.final_price;
-  return { value: fp?.value ?? null, currency: fp?.currency ?? null };
-}
-
-function regularPrice(p: ProductCardLike): { value: number | null; currency: string | null } {
   const rp = p.price_range?.minimum_price?.regular_price;
-  return { value: rp?.value ?? null, currency: rp?.currency ?? null };
-}
-
-function isOnSale(p: ProductCardLike): boolean {
-  const f = finalPrice(p).value;
-  const r = regularPrice(p).value;
-  return f != null && r != null && f < r;
-}
-
-function clean(v: string | null | undefined): string {
-  if (!v) return "";
-  return sanitizeHtml(v).replace(/<[^>]*>/g, "").trim();
-}
+  const onSale = fp?.value != null && rp?.value != null && fp.value < rp.value;
+  return {
+    uid: p.uid ?? p.sku ?? p.url_key ?? Math.random().toString(36).slice(2),
+    name: clean(p.name) || "Product",
+    href: hrefFor(p),
+    image: p.small_image?.url ?? null,
+    imageAlt: clean(p.small_image?.label) || clean(p.name) || "Product",
+    finalPrice: formatMoney(fp?.value ?? null, fp?.currency ?? null),
+    regularPrice: rp?.value != null ? formatMoney(rp.value, rp.currency ?? null) : null,
+    onSale,
+  };
+});
 
 const title = clean(heading ?? slider?.title ?? "");
 const subtitle = clean(subheading ?? slider?.subtitle ?? "");
 ---
-
-{slider && slider.items.length > 0 && (
-  <section class="mx-auto max-w-7xl px-4 py-8" aria-label={title || `Product slider: ${slug}`}>
-    <div class="mb-4 flex flex-wrap items-end justify-between gap-3">
-      <div>
-        {title && <h2 class="text-2xl font-bold tracking-tight text-zinc-900">{title}</h2>}
-        {subtitle && <p class="mt-1 text-sm text-zinc-600">{subtitle}</p>}
-      </div>
-      <SliderArrows client:idle trackId={trackId} />
-    </div>
-    <div
-      id={trackId}
-      data-slider-track
-      role="list"
-      tabindex="0"
-      class="panth-slider-track flex snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth pb-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] [scrollbar-width:thin]"
-    >
-      {slider.items.map((p) => {
-        const name = clean(p.name) || "Product";
-        const img = p.small_image?.url ?? "";
-        const alt = clean(p.small_image?.label) || name;
-        const href = hrefFor(p);
-        const fp = finalPrice(p);
-        const rp = regularPrice(p);
-        const onSale = isOnSale(p);
-        return (
-          <article
-            role="listitem"
-            class="w-[min(70%,16rem)] flex-none snap-start rounded-xl border border-zinc-200 bg-white shadow-sm transition hover:shadow-md"
-          >
-            <a href={href} class="block p-3">
-              <div class="relative aspect-square overflow-hidden rounded-lg bg-zinc-100">
-                {img ? (
-                  <img
-                    src={img}
-                    alt={alt}
-                    width="400"
-                    height="400"
-                    loading="lazy"
-                    decoding="async"
-                    class="h-full w-full object-cover"
-                  />
-                ) : (
-                  <span class="grid h-full w-full place-items-center text-zinc-400">No image</span>
-                )}
-                {onSale && (
-                  <span class="absolute left-2 top-2 rounded-full bg-[var(--color-brand)] px-2 py-0.5 text-[10px] font-semibold text-white shadow">
-                    SALE
-                  </span>
-                )}
-              </div>
-              <h3 class="mt-3 line-clamp-2 text-sm font-medium text-zinc-900">{name}</h3>
-              <div class="mt-1 flex items-baseline gap-2">
-                <span class="text-sm font-semibold text-zinc-900">
-                  {formatMoney(fp.value, fp.currency)}
-                </span>
-                {onSale && (
-                  <span class="text-xs text-zinc-500 line-through">
-                    {formatMoney(rp.value, rp.currency)}
-                  </span>
-                )}
-              </div>
-            </a>
-          </article>
-        );
-      })}
-    </div>
-  </section>
+{slider && products.length > 0 && (
+  <ProductCarousel
+    client:visible
+    products={products}
+    heading={title}
+    subheading={subtitle}
+    autoplay={slider.autoplay}
+    autoplayMs={slider.autoplayMs}
+    columnsDesktop={slider.columnsDesktop}
+  />
 )}
-
-<style>
-  .panth-slider-track::-webkit-scrollbar { height: 6px; }
-  .panth-slider-track::-webkit-scrollbar-thumb {
-    background: rgb(212, 212, 216);
-    border-radius: 9999px;
-  }
-</style>
