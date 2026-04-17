@@ -49,6 +49,11 @@ const crumbs: BreadcrumbItem[] = [
 ];
 
 const clearAllHref = buildHref(basePath, clearAllFilters(searchParams));
+
+const rawCols = Number.parseInt(searchParams.get("cols") ?? "", 10);
+const gridCols = rawCols === 2 ? "sm:grid-cols-2 lg:grid-cols-2"
+  : rawCols === 4 ? "sm:grid-cols-3 lg:grid-cols-4"
+  : "sm:grid-cols-2 lg:grid-cols-3";
 ---
 <Breadcrumbs items={crumbs} />
 
@@ -133,7 +138,7 @@ const clearAllHref = buildHref(basePath, clearAllFilters(searchParams));
           </a>
         </div>
       ) : (
-        <div class="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
+        <div class:list={["mt-4 grid grid-cols-2 gap-4", gridCols]}>
           {result.items.map((p, idx) => (
             <ProductCard product={p} eager={idx < 4} />
           ))}

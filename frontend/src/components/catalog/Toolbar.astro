@@ -95,6 +95,14 @@ function pageSizeHref(ps: number): string {
   return buildHref(basePath, next);
 }
 
+function colsHref(n: number): string {
+  const next = setParam(activeFilters, "cols", n === 3 ? "" : String(n));
+  return buildHref(basePath, next);
+}
+
+const rawCols = Number.parseInt(activeFilters.get("cols") ?? "", 10);
+const activeCols = rawCols === 2 || rawCols === 3 || rawCols === 4 ? rawCols : 3;
+
 // Stable IDs so the React island can find the selects.
 const sortId = `cat-sort-${Math.random().toString(36).slice(2, 9)}`;
 const pageSizeId = `cat-psize-${Math.random().toString(36).slice(2, 9)}`;
@@ -152,35 +160,22 @@ const pageSizeId = `cat-psize-${Math.random().toString(36).slice(2, 9)}`;
       <span class="text-zinc-500">per page</span>
     </label>
 
-    <div class="flex items-center gap-1" role="group" aria-label="View mode">
-      <button
-        type="button"
-        class="inline-flex h-8 w-8 items-center justify-center rounded border border-zinc-900 bg-zinc-900 text-white"
-        aria-pressed="true"
-        aria-label="Grid view"
-        disabled
-      >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-          <rect x="0" y="0" width="7" height="7" rx="1"/>
-          <rect x="9" y="0" width="7" height="7" rx="1"/>
-          <rect x="0" y="9" width="7" height="7" rx="1"/>
-          <rect x="9" y="9" width="7" height="7" rx="1"/>
-        </svg>
-      </button>
-      <button
-        type="button"
-        class="inline-flex h-8 w-8 cursor-not-allowed items-center justify-center rounded border border-zinc-200 bg-white text-zinc-300"
-        aria-pressed="false"
-        aria-label="List view (coming soon)"
-        disabled
-        title="List view coming soon"
-      >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-          <rect x="0" y="1" width="16" height="3" rx="1"/>
-          <rect x="0" y="7" width="16" height="3" rx="1"/>
-          <rect x="0" y="13" width="16" height="3" rx="1"/>
-        </svg>
-      </button>
+    <div class="flex items-center gap-1" role="group" aria-label="Columns per row">
+      {[2, 3, 4].map((n) => (
+        <a
+          href={colsHref(n)}
+          aria-pressed={n === activeCols ? "true" : "false"}
+          aria-label={`Show ${n} products per row`}
+          class:list={[
+            "inline-flex h-8 min-w-8 items-center justify-center rounded border px-2 text-xs font-semibold",
+            n === activeCols
+              ? "border-zinc-900 bg-zinc-900 text-white"
+              : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400",
+          ]}
+        >
+          {n}
+        </a>
+      ))}
     </div>
   </div>
 </div>

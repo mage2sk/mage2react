@@ -136,12 +136,18 @@ function linksFor(code: string, kind: Kind, options: AggregationOptionT[]): Opti
   )}
 
   <div class="divide-y divide-zinc-200 border-y border-zinc-200">
-    {visible.map((agg) => {
+    {visible.map((agg, idx) => {
       const kind = kindFor(agg.attribute_code);
       const title = agg.label ?? agg.attribute_code;
       const links = linksFor(agg.attribute_code, kind, agg.options);
+      // Only the first section is open by default; the rest start collapsed
+      // so a long facet list doesn't push the product grid below the fold.
+      // Sections whose filter is already active are also opened so the user
+      // can see the selected values without an extra click.
+      const hasActive = links.some((l) => l.active);
+      const isOpen = idx === 0 || hasActive;
       return (
-        <details open class="group py-3">
+        <details open={isOpen || undefined} class="group py-3">
           <summary class="flex cursor-pointer items-center justify-between gap-2 text-sm font-medium text-zinc-900 outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]">
             <span>{title}</span>
             <span class="text-zinc-400 transition group-open:rotate-180" aria-hidden="true">▾</span>

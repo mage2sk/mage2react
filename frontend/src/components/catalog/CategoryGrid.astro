@@ -74,19 +74,15 @@ crumbs.push({ name: title, url: new URL(basePath, SITE_URL).toString() });
 
 const clearAllHref = buildHref(basePath, clearAllFilters(searchParams));
 
+const rawCols = Number.parseInt(searchParams.get("cols") ?? "", 10);
+const gridCols = rawCols === 2 ? "sm:grid-cols-2 lg:grid-cols-2"
+  : rawCols === 4 ? "sm:grid-cols-3 lg:grid-cols-4"
+  : "sm:grid-cols-2 lg:grid-cols-3";
+
 // JSON-LD generation is deliberately left to the caller (so it can flow into
 // the parent `<Layout jsonLd={…}/>` prop). `buildCategoryJsonLd` in
 // `~/lib/catalog-helpers` is the canonical builder.
 ---
-<Breadcrumbs items={crumbs} />
-
-<header class="mb-6 border-b border-zinc-200 pb-4">
-  <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">{title}</h1>
-  {descriptionHtml && (
-    <div class="prose prose-sm mt-3 max-w-none text-zinc-600" set:html={descriptionHtml} />
-  )}
-</header>
-
 <div class="grid gap-8 lg:grid-cols-[260px_1fr]">
   {/* Mobile filter trigger + drawer (filter links come from the clone source below). */}
   <div class="flex items-center gap-3 lg:hidden">
@@ -140,7 +136,7 @@ const clearAllHref = buildHref(basePath, clearAllFilters(searchParams));
         </a>
       </div>
     ) : (
-      <div class="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
+      <div class:list={["mt-4 grid grid-cols-2 gap-4", gridCols]}>
         {result.items.map((p, idx) => (
           <ProductCard product={p} eager={idx < 4} />
         ))}

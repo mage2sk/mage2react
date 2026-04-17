@@ -130,7 +130,7 @@ export type CatalogProductsResultT = {
 /* -------------------------------------------------------------------------- */
 
 export const RESERVED_PARAMS = new Set<string>([
-  "page", "p", "pageSize", "ps", "sort", "q", "view", "dir",
+  "page", "p", "pageSize", "ps", "sort", "q", "view", "dir", "cols",
 ]);
 
 /** Known sort keys we'll forward to Magento. Anything else falls back to default. */

@@ -27,7 +27,12 @@ import LayeredNav from "~/components/catalog/LayeredNav.astro";
 import LayeredNavMobile from "~/components/catalog/LayeredNavMobile.tsx";
 import ActiveFilters from "~/components/catalog/ActiveFilters.astro";
 import Toolbar from "~/components/catalog/Toolbar.astro";
+import Reviews from "~/components/product/Reviews.astro";
+import ReviewForm from "~/components/product/ReviewForm.tsx";
 import { renderCategoryPayload, buildCategoryJsonLd } from "~/lib/catalog-helpers";
+import { getCategoryWidgetBlocks } from "~/lib/queries-category-widgets";
+import { getCmsBlocks } from "~/lib/queries";
+import { getReviewMetadata } from "~/lib/queries-reviews";
 import AddToCartButton from "~/components/AddToCartButton.tsx";
 import Gallery from "~/components/product/Gallery.astro";
 import ConfigurableOptions from "~/components/product/ConfigurableOptions.tsx";
@@ -252,6 +257,11 @@ let categoryProducts: Awaited<ReturnType<typeof getProductsByCategoryUid>>["prod
 let categoryPage = 1;
 
 let categoryFacetedPayload: Awaited<ReturnType<typeof renderCategoryPayload>> = null;
+let categoryWidgetBlocks: {
+  sidebarHtml: string[];
+  contentTopHtml: string[];
+} = { sidebarHtml: [], contentTopHtml: [] };
+
 if (finalResolved.type === "CATEGORY" && finalResolved.uid) {
   const pageParam = Astro.url.searchParams.get("page");
   categoryPage = Math.max(1, Number.parseInt(pageParam ?? "1", 10) || 1);
@@ -260,7 +270,13 @@ if (finalResolved.type === "CATEGORY" && finalResolved.uid) {
   const descendantUids = (cat?.children ?? [])
     .map((c) => c.uid)
     .filter((u): u is string => Boolean(u));
-  const [prods, payload] = await Promise.all([
+
+  const widgets = finalResolved.id
+    ? await getCategoryWidgetBlocks(finalResolved.id)
+    : [];
+  const widgetIdentifiers = widgets.map((w) => w.blockIdentifier);
+
+  const [prods, payload, widgetBlocks] = await Promise.all([
     getProductsByCategoryUid(
       finalResolved.uid,
       categoryPage,
@@ -269,9 +285,36 @@ if (finalResolved.type === "CATEGORY" && finalResolved.uid) {
       descendantUids,
     ),
     renderCategoryPayload(slugNoSuffix, Astro.url.searchParams),
+    widgetIdentifiers.length > 0
+      ? getCmsBlocks(widgetIdentifiers)
+      : Promise.resolve({} as Record<string, { content: string | null } | undefined>),
   ]);
   categoryProducts = prods.products;
   categoryFacetedPayload = payload;
+
+  const sidebarHtml: string[] = [];
+  const contentTopHtml: string[] = [];
+  const BASE_URL = import.meta.env.PUBLIC_SITE_URL || "https://mage2react.local";
+  const MEDIA_BASE = (import.meta.env.PUBLIC_MEDIA_URL ?? `${BASE_URL}/media`).replace(/\/+$/, "");
+  function cleanMagentoDirectives(html: string): string {
+    // Strip unresolved `{{widget type="..."}}` directives — they expand to
+    // product HTML in Luma but we render products via our own slider below.
+    let out = html.replace(/\{\{widget[\s\S]*?\}\}/gi, "");
+    // Resolve Magento placeholder directives that survived into the content.
+    out = out.replace(/\{\{store\s+url=""\s*\}\}/gi, `${BASE_URL}/`);
+    out = out.replace(/\{\{store\s+url="([^"]*)"\s*\}\}/gi, (_m, p) => `${BASE_URL}/${p}`);
+    out = out.replace(/\{\{media\s+url="([^"]*)"\s*\}\}/gi, (_m, p) => `${MEDIA_BASE}/${p}`);
+    return out;
+  }
+  for (const w of widgets) {
+    const block = widgetBlocks[w.blockIdentifier];
+    const html = block?.content;
+    if (!html) continue;
+    const cleaned = cleanMagentoDirectives(html);
+    if (w.position === "sidebar.main") sidebarHtml.push(cleaned);
+    else if (w.position === "content.top") contentTopHtml.push(cleaned);
+  }
+  categoryWidgetBlocks = { sidebarHtml, contentTopHtml };
 }
 
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -279,13 +322,17 @@ if (finalResolved.type === "CATEGORY" && finalResolved.uid) {
 /* ────────────────────────────────────────────────────────────────────────── */
 
 let product: ProductT | null = null;
+let reviewMetadata: Awaited<ReturnType<typeof getReviewMetadata>> | null = null;
 if (finalResolved.type === "PRODUCT") {
-  // Take the last `/`-segment of the resolved path (or original slug) as the
-  // url_key. Some installs return paths like `url_key.html`.
   const relPath = finalResolved.relativeUrl ?? withSuffix;
   const last = stripSlashes(relPath).split("/").pop() ?? slugNoSuffix;
   const urlKey = last.replace(/\.html$/, "");
-  product = await getProductByUrlKey(urlKey);
+  const [p, meta] = await Promise.all([
+    getProductByUrlKey(urlKey),
+    getReviewMetadata().catch(() => null),
+  ]);
+  product = p;
+  reviewMetadata = meta;
 }
 
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -714,12 +761,73 @@ if (finalResolved.type === "CMS_PAGE" && !cmsPage) {
           </>
         )}
 
-        {productView.longHtml && (
-          <details class="mt-12 border-t border-zinc-200 pt-8" open>
-            <summary class="cursor-pointer text-lg font-semibold">Details</summary>
-            <div class="prose prose-sm mt-4 max-w-none text-zinc-700" set:html={productView.longHtml} />
+        <div class="mt-12 border-t border-zinc-200 pt-8">
+          {productView.longHtml && (
+            <details class="group border-b border-zinc-200 pb-4" open>
+              <summary class="flex cursor-pointer items-center justify-between py-3 text-lg font-semibold">
+                <span>Details</span>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-zinc-500 transition group-open:rotate-180" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
+              </summary>
+              <div class="prose prose-sm mt-2 max-w-none text-zinc-700" set:html={productView.longHtml} />
+            </details>
+          )}
+
+          <details class="group border-b border-zinc-200 py-4">
+            <summary class="flex cursor-pointer items-center justify-between text-lg font-semibold">
+              <span>More Information</span>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-zinc-500 transition group-open:rotate-180" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
+            </summary>
+            <dl class="mt-4 divide-y divide-zinc-100 text-sm">
+              <div class="flex gap-6 py-2">
+                <dt class="w-40 font-medium text-zinc-500">SKU</dt>
+                <dd class="text-zinc-900">{productView.p.sku}</dd>
+              </div>
+              {productView.p.stock_status && (
+                <div class="flex gap-6 py-2">
+                  <dt class="w-40 font-medium text-zinc-500">Availability</dt>
+                  <dd class="text-zinc-900">{productView.p.stock_status === "IN_STOCK" ? "In stock" : "Out of stock"}</dd>
+                </div>
+              )}
+              {productView.p.only_x_left_in_stock != null && productView.p.only_x_left_in_stock > 0 && (
+                <div class="flex gap-6 py-2">
+                  <dt class="w-40 font-medium text-zinc-500">On hand</dt>
+                  <dd class="text-zinc-900">Only {productView.p.only_x_left_in_stock} left</dd>
+                </div>
+              )}
+              {productView.p.categories && productView.p.categories.length > 0 && (
+                <div class="flex gap-6 py-2">
+                  <dt class="w-40 font-medium text-zinc-500">Categories</dt>
+                  <dd class="text-zinc-900">
+                    {productView.p.categories
+                      .map((c) => c.name)
+                      .filter((n): n is string => Boolean(n))
+                      .join(", ")}
+                  </dd>
+                </div>
+              )}
+              {productView.p.meta_keyword && (
+                <div class="flex gap-6 py-2">
+                  <dt class="w-40 font-medium text-zinc-500">Tags</dt>
+                  <dd class="text-zinc-900">{productView.p.meta_keyword}</dd>
+                </div>
+              )}
+            </dl>
           </details>
-        )}
+
+          <details class="group border-b border-zinc-200 py-4" id="reviews">
+            <summary class="flex cursor-pointer items-center justify-between text-lg font-semibold">
+              <span>Reviews{productView.p.review_count != null ? ` (${productView.p.review_count})` : ""}</span>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-zinc-500 transition group-open:rotate-180" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
+            </summary>
+            <div class="mt-4 grid gap-8 lg:grid-cols-[1fr_360px]">
+              <Reviews sku={productView.p.sku} />
+              <div>
+                <h3 class="text-base font-semibold text-zinc-900">Write a review</h3>
+                <ReviewForm client:visible sku={productView.p.sku} metadata={reviewMetadata} />
+              </div>
+            </div>
+          </details>
+        </div>
       </div>
     </article>
 
@@ -768,23 +876,58 @@ if (finalResolved.type === "CMS_PAGE" && !cmsPage) {
     prev={categoryView.absPrev}
     next={categoryView.absNext}
   >
-    {!categoryFacetedPayload && (
-      <>
-        <Breadcrumbs items={categoryView.crumbs} />
+    <Breadcrumbs items={categoryView.crumbs} />
 
-        <header class="mb-8 border-b border-zinc-200 pb-6">
-          <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">{categoryView.title}</h1>
-          {categoryView.descriptionHtml && (
-            <div class="prose prose-sm mt-4 max-w-none text-zinc-600" set:html={categoryView.descriptionHtml} />
-          )}
-          {category.display_mode !== "PAGE" && (
-            <p class="mt-3 text-sm text-zinc-500">
-              {categoryProducts.total_count} {categoryProducts.total_count === 1 ? "product" : "products"}
-            </p>
-          )}
-        </header>
-      </>
+    <header class="mb-6 border-b border-zinc-200 pb-6">
+      <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">{categoryView.title}</h1>
+      {categoryView.descriptionHtml && (
+        <div class="prose prose-sm mt-4 max-w-none text-zinc-600" set:html={categoryView.descriptionHtml} />
+      )}
+    </header>
+
+    {(categoryWidgetBlocks.sidebarHtml.length > 0 || categoryWidgetBlocks.contentTopHtml.length > 0) && (
+      <div class="grid gap-8 lg:grid-cols-[240px_1fr]">
+        {categoryWidgetBlocks.sidebarHtml.length > 0 ? (
+          <aside class="space-y-6">
+            {categoryWidgetBlocks.sidebarHtml.map((html) => (
+              <div class="panth-category-sidebar" set:html={sanitizeHtml(html)} />
+            ))}
+          </aside>
+        ) : <div class="hidden lg:block" aria-hidden="true" />}
+        <div class="min-w-0">
+          {categoryWidgetBlocks.contentTopHtml.map((html) => (
+            <div class="panth-category-promo" set:html={sanitizeHtml(html)} />
+          ))}
+        </div>
+      </div>
     )}
+
+    <style>
+      .panth-category-sidebar ul { list-style: none; padding: 0; margin: 0; }
+      .panth-category-sidebar li { border-bottom: 1px solid rgb(244, 244, 245); padding: 0.5rem 0; }
+      .panth-category-sidebar a { color: rgb(9, 9, 11); font-size: 0.875rem; }
+      .panth-category-sidebar a:hover { color: var(--color-brand); }
+      .panth-category-sidebar strong,
+      .panth-category-sidebar .category-title { display: block; font-size: 0.875rem; font-weight: 700; margin-top: 1.25rem; margin-bottom: 0.5rem; color: rgb(9, 9, 11); }
+
+      .panth-category-promo .blocks-promo { display: grid; gap: 1rem; }
+      .panth-category-promo .block-promo-wrapper { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+      .panth-category-promo .block-promo { position: relative; display: block; overflow: hidden; border-radius: 1rem; color: #fff; }
+      .panth-category-promo .block-promo img { width: 100%; height: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; }
+      .panth-category-promo .block-promo .content { position: absolute; inset: 0; padding: 1.25rem 1.5rem; display: flex; flex-direction: column; justify-content: flex-end; background: linear-gradient(180deg, transparent 50%, rgba(0,0,0,0.55) 100%); }
+      .panth-category-promo .block-promo.new-main { grid-column: 1 / -1; }
+      .panth-category-promo .block-promo.new-main img { aspect-ratio: 21 / 9; }
+      .panth-category-promo .block-promo .info { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.9; }
+      .panth-category-promo .block-promo .title { display: block; font-size: 1.25rem; font-weight: 700; line-height: 1.25; margin-top: 0.25rem; }
+      .panth-category-promo .block-promo .more { display: inline-flex; align-items: center; align-self: flex-start; margin-top: 0.75rem; padding: 0.4rem 0.9rem; border-radius: 9999px; background: #fff; color: rgb(9, 9, 11); font-size: 0.8125rem; font-weight: 600; }
+      .panth-category-promo .block-promo:hover { opacity: 0.95; }
+      .panth-category-promo .content-heading { margin: 2rem 0 1rem; }
+      .panth-category-promo .content-heading .title { font-size: 1.5rem; font-weight: 700; color: rgb(9, 9, 11); }
+      .panth-category-promo .content-heading .info { color: rgb(82, 82, 91); }
+      @media (max-width: 640px) {
+        .panth-category-promo .block-promo-wrapper { grid-template-columns: 1fr; }
+      }
+    </style>
 
     {category.cms_block?.content && (
       <section
