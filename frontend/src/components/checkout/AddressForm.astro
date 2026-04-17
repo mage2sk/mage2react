@@ -1,0 +1,171 @@
+---
+import FormField from "~/components/customer/FormField.astro";
+import RegionSelect from "./RegionSelect.tsx";
+import type { CheckoutCountryT } from "~/lib/queries-checkout";
+
+/**
+ * Address fieldset reused across shipping (`/checkout/shipping`) and billing
+ * (`/checkout/payment`) steps. The `prefix` prop lets the same fieldset be
+ * rendered twice on the payment page (shipping read-only + billing editable)
+ * without field-id collisions. Field `name`s are not prefixed — the consuming
+ * page decides which form they live in.
+ */
+type Props = {
+  countries: CheckoutCountryT[];
+  values?: Record<string, string>;
+  errors?: Record<string, string>;
+  defaultCountryCode?: string;
+  /** DOM id prefix; use `bill` / `ship` to avoid collisions on payment page. */
+  prefix?: string;
+  /** Optional wrapping heading. */
+  heading?: string | null;
+  /** Only shown for authenticated customers. */
+  showSaveInAddressBook?: boolean;
+  showEmailField?: boolean;
+  emailValue?: string;
+  emailError?: string | null;
+};
+
+const {
+  countries,
+  values = {},
+  errors = {},
+  defaultCountryCode = "US",
+  prefix = "addr",
+  heading = "Address",
+  showSaveInAddressBook = false,
+  showEmailField = false,
+  emailValue = "",
+  emailError = null,
+} = Astro.props as Props;
+
+function val(field: string, fallback: string = ""): string {
+  const v = values[field];
+  if (v != null) return v;
+  return fallback;
+}
+
+const initial = {
+  firstname: val("firstname"),
+  lastname: val("lastname"),
+  telephone: val("telephone"),
+  street0: val("street0"),
+  street1: val("street1"),
+  city: val("city"),
+  country_code: val("country_code", defaultCountryCode),
+  region_id: val("region_id"),
+  region: val("region"),
+  postcode: val("postcode"),
+};
+---
+<fieldset class="flex flex-col gap-6">
+  {heading && <legend class="text-lg font-semibold text-zinc-900">{heading}</legend>}
+
+  {showEmailField && (
+    <FormField
+      id={`${prefix}-email`}
+      name="email"
+      type="email"
+      label="Email Address"
+      value={emailValue}
+      required
+      autocomplete="email"
+      error={emailError}
+      helpText="We'll send your order confirmation here."
+    />
+  )}
+
+  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <FormField
+      id={`${prefix}-firstname`}
+      name="firstname"
+      label="First Name"
+      value={initial.firstname}
+      required
+      autocomplete="given-name"
+      error={errors.firstname ?? null}
+    />
+    <FormField
+      id={`${prefix}-lastname`}
+      name="lastname"
+      label="Last Name"
+      value={initial.lastname}
+      required
+      autocomplete="family-name"
+      error={errors.lastname ?? null}
+    />
+  </div>
+
+  <FormField
+    id={`${prefix}-street0`}
+    name="street0"
+    label="Street Address"
+    value={initial.street0}
+    required
+    autocomplete="address-line1"
+    error={errors.street0 ?? null}
+  />
+  <FormField
+    id={`${prefix}-street1`}
+    name="street1"
+    label="Street Address Line 2"
+    value={initial.street1}
+    autocomplete="address-line2"
+    error={errors.street1 ?? null}
+  />
+
+  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <FormField
+      id={`${prefix}-city`}
+      name="city"
+      label="City"
+      value={initial.city}
+      required
+      autocomplete="address-level2"
+      error={errors.city ?? null}
+    />
+    <FormField
+      id={`${prefix}-postcode`}
+      name="postcode"
+      label="Zip / Postal Code"
+      value={initial.postcode}
+      required
+      autocomplete="postal-code"
+      error={errors.postcode ?? null}
+    />
+  </div>
+
+  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <RegionSelect
+      client:idle
+      countries={countries}
+      selectedCountry={initial.country_code}
+      selectedRegionId={initial.region_id}
+      selectedRegion={initial.region}
+      idPrefix={prefix}
+    />
+  </div>
+
+  <FormField
+    id={`${prefix}-telephone`}
+    name="telephone"
+    label="Phone Number"
+    type="tel"
+    value={initial.telephone}
+    required
+    autocomplete="tel"
+    error={errors.telephone ?? null}
+  />
+
+  {showSaveInAddressBook && (
+    <label class="flex items-start gap-2 text-sm">
+      <input
+        type="checkbox"
+        name="save_in_address_book"
+        value="1"
+        class="mt-0.5 h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-400"
+      />
+      <span>Save this address to my address book</span>
+    </label>
+  )}
+</fieldset>

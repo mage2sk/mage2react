@@ -1,0 +1,114 @@
+---
+import type { ProductCardT } from "~/lib/queries";
+import { formatMoney } from "~/lib/money";
+import CardActions from "~/components/product/CardActions.tsx";
+
+type Props = { product: ProductCardT; eager?: boolean };
+const { product, eager = false } = Astro.props;
+
+const suffix = product.url_suffix ?? ".html";
+const href = product.url_key ? `/${product.url_key}${suffix}` : "#";
+const imageUrl = product.small_image?.url ?? null;
+const imageAlt = product.small_image?.label ?? product.name;
+const final = product.price_range.minimum_price.final_price;
+const regular = product.price_range.minimum_price.regular_price;
+const onSale =
+  final.value != null &&
+  regular.value != null &&
+  final.value < regular.value;
+
+// A `CategoryProductCardT` may have configurable_options with swatch data —
+// render small color-swatch previews under the price when present.
+const swatches = (() => {
+  type Opt = {
+    attribute_code: string | null;
+    values: Array<{
+      uid: string;
+      label: string | null;
+      swatch_data?: {
+        value?: string | null;
+        __typename?: string | null;
+        thumbnail?: string | null;
+      } | null;
+    }>;
+  };
+  const p = product as unknown as { configurable_options?: Opt[] | null };
+  const color = p.configurable_options?.find((o) => o.attribute_code === "color");
+  if (!color) return [] as Array<{ uid: string; label: string; color: string; kind: "color" | "image"; thumbnail: string | null }>;
+  return color.values
+    .filter((v) => v.swatch_data)
+    .slice(0, 6)
+    .map((v) => ({
+      uid: v.uid,
+      label: v.label ?? "",
+      color: v.swatch_data?.value ?? "#e5e7eb",
+      kind: v.swatch_data?.__typename === "ImageSwatchData" ? ("image" as const) : ("color" as const),
+      thumbnail: v.swatch_data?.thumbnail ?? null,
+    }));
+})();
+---
+<div class="group relative flex flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white transition hover:shadow-md">
+  <a href={href} class="relative block" aria-label={product.name}>
+    <div class="relative aspect-[4/5] w-full overflow-hidden bg-zinc-100">
+      {imageUrl ? (
+        <img
+          src={imageUrl}
+          alt={imageAlt}
+          width="400"
+          height="500"
+          loading={eager ? "eager" : "lazy"}
+          decoding="async"
+          class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
+        />
+      ) : (
+        <div class="flex h-full w-full items-center justify-center text-xs text-zinc-400">
+          No image
+        </div>
+      )}
+      {onSale && (
+        <span class="absolute top-2 left-2 rounded-full bg-red-600 px-2 py-1 text-[10px] font-semibold text-white shadow">
+          SALE
+        </span>
+      )}
+    </div>
+    <CardActions
+      client:visible
+      sku={product.sku}
+      name={product.name}
+      urlKey={product.url_key ?? ""}
+      urlSuffix={suffix}
+      typename={product.__typename}
+      productHref={href}
+    />
+  </a>
+
+  <div class="flex flex-1 flex-col gap-1 p-3">
+    <h3 class="line-clamp-2 text-sm font-medium text-zinc-900">
+      <a href={href} class="hover:text-[var(--color-brand)]">{product.name}</a>
+    </h3>
+    <div class="mt-auto flex items-baseline gap-2">
+      <p class="text-sm font-semibold text-zinc-900">
+        {formatMoney(final.value, final.currency)}
+      </p>
+      {onSale && (
+        <p class="text-xs text-zinc-500 line-through">
+          {formatMoney(regular.value, regular.currency)}
+        </p>
+      )}
+    </div>
+    {swatches.length > 0 && (
+      <div class="mt-1 flex gap-1.5" aria-label="Available colors">
+        {swatches.map((s) => (
+          <span
+            class="inline-block size-4 rounded-full border border-zinc-200"
+            style={s.kind === "image" && s.thumbnail
+              ? `background-image:url(${s.thumbnail});background-size:cover`
+              : `background-color:${s.color}`}
+            title={s.label}
+            aria-label={s.label}
+          />
+        ))}
+      </div>
+    )}
+  </div>
+</div>

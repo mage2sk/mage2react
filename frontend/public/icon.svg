@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="mage2react">
+  <rect width="512" height="512" rx="96" ry="96" fill="#0b5fff"/>
+  <g fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="700" text-anchor="middle">
+    <text x="256" y="300" font-size="190" letter-spacing="-8">m2r</text>
+  </g>
+</svg>

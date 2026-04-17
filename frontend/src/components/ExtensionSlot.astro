@@ -1,0 +1,23 @@
+---
+/**
+ * ExtensionSlot — opaque extension point for third-party integrations.
+ *
+ * This is a deliberate stub. The intent is that a future Magento module
+ * exposes an endpoint such as `http://nginx/panthreact/extension/get?name=X`
+ * which returns sanitised HTML to render at the named slot (e.g. a banner,
+ * a promo strip, a review widget). Consumers would use it like:
+ *
+ *   <ExtensionSlot name="home-above-fold" />
+ *
+ * For now it renders nothing — the prop is declared so templates can be
+ * wired up ahead of the backend hook landing.
+ */
+export interface Props {
+  name: string;
+}
+
+// Consume the prop so TypeScript doesn't complain about it being unused.
+const _name: string = Astro.props.name;
+void _name;
+---
+{/* Intentionally empty: wire up /panthreact/extension/get?name=X later. */}

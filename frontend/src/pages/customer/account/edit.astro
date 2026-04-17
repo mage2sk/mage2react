@@ -1,0 +1,345 @@
+---
+import AccountLayout from "~/components/customer/AccountLayout.astro";
+import FormField from "~/components/customer/FormField.astro";
+import {
+  getCustomer,
+  updateCustomer,
+  changeCustomerPassword,
+  setCustomerNewsletter,
+  friendlyAuthError,
+} from "~/lib/queries-customer";
+import {
+  clearCustomerToken,
+  requireAuth,
+  setCustomerToken,
+} from "~/lib/auth";
+import { createCustomerToken } from "~/lib/queries-customer";
+import { getStoreConfig } from "~/lib/queries";
+import { z } from "zod";
+
+const auth = requireAuth(Astro);
+if (auth instanceof Response) return auth;
+let token = auth;
+
+const storeConfig = await getStoreConfig();
+const minPasswordLength = Math.max(
+  8,
+  Number.parseInt(storeConfig.minimum_password_length ?? "8", 10) || 8,
+);
+
+const newsletterMode = Astro.url.searchParams.get("newsletter") === "1";
+
+const UpdateSchema = z.object({
+  firstname: z.string().trim().min(1, "Please enter your first name."),
+  lastname: z.string().trim().min(1, "Please enter your last name."),
+  email: z.string().trim().email("Please enter a valid email address."),
+});
+
+const ChangePasswordSchema = z
+  .object({
+    current_password: z.string().min(1, "Please enter your current password."),
+    password: z.string().min(minPasswordLength, `Password must be at least ${minPasswordLength} characters.`),
+    password_confirmation: z.string(),
+  })
+  .refine((d) => d.password === d.password_confirmation, {
+    path: ["password_confirmation"],
+    message: "Passwords do not match.",
+  });
+
+let errors: Record<string, string> = {};
+let globalError: string | null = null;
+let successMessage: string | null = null;
+
+let customer;
+try {
+  customer = await getCustomer(token);
+} catch (err) {
+  console.warn("[customer-edit] initial load failed", {
+    message: err instanceof Error ? err.message : String(err),
+  });
+  clearCustomerToken(Astro);
+  return Astro.redirect("/customer/account/login?flash=session_expired", 303);
+}
+
+let values = {
+  firstname: customer.firstname ?? "",
+  lastname: customer.lastname ?? "",
+  email: customer.email ?? "",
+  is_subscribed: customer.is_subscribed ?? false,
+};
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  const intent = String(form.get("intent") ?? "profile");
+
+  if (intent === "newsletter") {
+    const subscribe = !!form.get("is_subscribed");
+    try {
+      await setCustomerNewsletter(token, subscribe);
+      return Astro.redirect(
+        `/customer/account?flash=${subscribe ? "newsletter_subscribed" : "newsletter_unsubscribed"}`,
+        303,
+      );
+    } catch (err) {
+      console.warn("[customer-edit] newsletter failed", {
+        message: err instanceof Error ? err.message : String(err),
+      });
+      globalError = friendlyAuthError(err);
+      values.is_subscribed = subscribe;
+    }
+  } else if (intent === "password") {
+    const currentPassword = String(form.get("current_password") ?? "");
+    const password = String(form.get("password") ?? "");
+    const password_confirmation = String(form.get("password_confirmation") ?? "");
+    const parsed = ChangePasswordSchema.safeParse({
+      current_password: currentPassword,
+      password,
+      password_confirmation,
+    });
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) {
+        const key = issue.path[0];
+        if (typeof key === "string" && !errors[key]) errors[key] = issue.message;
+      }
+    } else {
+      try {
+        await changeCustomerPassword(token, parsed.data.current_password, parsed.data.password);
+        return Astro.redirect("/customer/account?flash=password_updated", 303);
+      } catch (err) {
+        console.warn("[customer-edit] password change failed", {
+          message: err instanceof Error ? err.message : String(err),
+        });
+        globalError = friendlyAuthError(err);
+      }
+    }
+  } else {
+    const firstname = String(form.get("firstname") ?? "").trim();
+    const lastname = String(form.get("lastname") ?? "").trim();
+    const email = String(form.get("email") ?? "").trim();
+    values = { ...values, firstname, lastname, email };
+    const parsed = UpdateSchema.safeParse({ firstname, lastname, email });
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) {
+        const key = issue.path[0];
+        if (typeof key === "string" && !errors[key]) errors[key] = issue.message;
+      }
+    } else {
+      try {
+        // Magento requires password re-verification when the email changes.
+        const emailChanged = parsed.data.email !== customer.email;
+        if (emailChanged) {
+          const currentPassword = String(form.get("current_password") ?? "");
+          if (!currentPassword) {
+            errors.current_password = "Please enter your current password to change email.";
+          } else {
+            await updateCustomer(token, {
+              firstname: parsed.data.firstname,
+              lastname: parsed.data.lastname,
+              email: parsed.data.email,
+              password: currentPassword,
+            });
+            // Re-authenticate with the new email to refresh the token.
+            const newToken = await createCustomerToken(parsed.data.email, currentPassword);
+            setCustomerToken(Astro, newToken);
+            token = newToken;
+            return Astro.redirect("/customer/account?flash=account_updated", 303);
+          }
+        } else {
+          await updateCustomer(token, {
+            firstname: parsed.data.firstname,
+            lastname: parsed.data.lastname,
+          });
+          return Astro.redirect("/customer/account?flash=account_updated", 303);
+        }
+      } catch (err) {
+        console.warn("[customer-edit] update failed", {
+          message: err instanceof Error ? err.message : String(err),
+        });
+        globalError = friendlyAuthError(err);
+      }
+    }
+  }
+}
+---
+<AccountLayout
+  title={newsletterMode ? "Newsletter Subscription" : "Account Information"}
+  pageHeading={newsletterMode ? "Newsletter Subscription" : "Edit Account Information"}
+  flashMessage={globalError ?? successMessage}
+  flashVariant={globalError ? "error" : "success"}
+>
+  {newsletterMode ? (
+    <section class="rounded-xl border border-zinc-200 bg-white p-6">
+      <h2 class="mb-4 text-lg font-semibold">Subscription Option</h2>
+      <form method="post" class="flex flex-col gap-4">
+        <input type="hidden" name="intent" value="newsletter" />
+        <label class="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            name="is_subscribed"
+            value="1"
+            checked={values.is_subscribed}
+            class="mt-0.5 h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-400"
+          />
+          <span>General Subscription</span>
+        </label>
+        <div class="flex items-center justify-between pt-2">
+          <a href="/customer/account" class="text-sm font-medium text-zinc-600 hover:text-zinc-900">Back</a>
+          <button
+            type="submit"
+            class="inline-flex items-center rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800"
+          >
+            Save
+          </button>
+        </div>
+      </form>
+    </section>
+  ) : (
+    <div class="flex flex-col gap-6">
+      <form method="post" class="flex flex-col gap-6" novalidate>
+        <input type="hidden" name="intent" value="profile" />
+        <section class="rounded-xl border border-zinc-200 bg-white p-6">
+          <h2 class="mb-4 text-lg font-semibold">Account Information</h2>
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <FormField
+              id="edit-firstname"
+              name="firstname"
+              label="First Name"
+              value={values.firstname}
+              required
+              autocomplete="given-name"
+              error={errors.firstname ?? null}
+            />
+            <FormField
+              id="edit-lastname"
+              name="lastname"
+              label="Last Name"
+              value={values.lastname}
+              required
+              autocomplete="family-name"
+              error={errors.lastname ?? null}
+            />
+          </div>
+          <div class="mt-4">
+            <FormField
+              id="edit-email"
+              name="email"
+              label="Email"
+              type="email"
+              value={values.email}
+              required
+              autocomplete="email"
+              error={errors.email ?? null}
+            />
+          </div>
+          <div class="mt-4" id="email-password-wrap" hidden>
+            <FormField
+              id="edit-current-password-for-email"
+              name="current_password"
+              label="Current Password (required to change email)"
+              type="password"
+              autocomplete="current-password"
+              error={errors.current_password ?? null}
+            />
+          </div>
+        </section>
+        <div class="flex items-center justify-between">
+          <a href="/customer/account" class="text-sm font-medium text-zinc-600 hover:text-zinc-900">Back</a>
+          <button
+            type="submit"
+            class="inline-flex items-center rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800"
+          >
+            Save
+          </button>
+        </div>
+      </form>
+
+      <form method="post" class="flex flex-col gap-6" novalidate>
+        <input type="hidden" name="intent" value="password" />
+        <section class="rounded-xl border border-zinc-200 bg-white p-6">
+          <div class="mb-4 flex items-center justify-between">
+            <h2 class="text-lg font-semibold">Change Password</h2>
+            <button
+              type="button"
+              id="toggle-password"
+              aria-expanded="false"
+              aria-controls="password-fields"
+              class="text-sm font-medium text-zinc-600 hover:text-zinc-900"
+            >
+              <span data-label-hide hidden>Hide</span>
+              <span data-label-show>Show</span>
+            </button>
+          </div>
+          <div id="password-fields" hidden class="grid grid-cols-1 gap-4">
+            <FormField
+              id="edit-current-password"
+              name="current_password"
+              label="Current Password"
+              type="password"
+              autocomplete="current-password"
+              error={errors.current_password ?? null}
+            />
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <FormField
+                id="edit-new-password"
+                name="password"
+                label="New Password"
+                type="password"
+                autocomplete="new-password"
+                minLength={minPasswordLength}
+                error={errors.password ?? null}
+              />
+              <FormField
+                id="edit-new-password-confirm"
+                name="password_confirmation"
+                label="Confirm New Password"
+                type="password"
+                autocomplete="new-password"
+                minLength={minPasswordLength}
+                error={errors.password_confirmation ?? null}
+              />
+            </div>
+            <div class="flex justify-end">
+              <button
+                type="submit"
+                class="inline-flex items-center rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800"
+              >
+                Update Password
+              </button>
+            </div>
+          </div>
+        </section>
+      </form>
+    </div>
+  )}
+</AccountLayout>
+
+<script>
+  // Change-password disclosure. Progressive enhancement — with JS off the
+  // fields are hidden (but form still submits); users can enable via
+  // `?password=1` query if we ever need it.
+  const toggle = document.getElementById("toggle-password");
+  const fields = document.getElementById("password-fields");
+  if (toggle && fields) {
+    toggle.addEventListener("click", () => {
+      const expanded = toggle.getAttribute("aria-expanded") === "true";
+      toggle.setAttribute("aria-expanded", expanded ? "false" : "true");
+      if (expanded) fields.setAttribute("hidden", "");
+      else fields.removeAttribute("hidden");
+      toggle.querySelector("[data-label-show]")?.toggleAttribute("hidden");
+      toggle.querySelector("[data-label-hide]")?.toggleAttribute("hidden");
+    });
+  }
+
+  // Email-change password requirement: show the in-form password input only
+  // when the email value differs from its initial value.
+  const emailInput = document.getElementById("edit-email") as HTMLInputElement | null;
+  const emailPwWrap = document.getElementById("email-password-wrap");
+  if (emailInput && emailPwWrap) {
+    const original = emailInput.value;
+    const update = () => {
+      if (emailInput.value.trim() !== original) emailPwWrap.removeAttribute("hidden");
+      else emailPwWrap.setAttribute("hidden", "");
+    };
+    emailInput.addEventListener("input", update);
+  }
+</script>

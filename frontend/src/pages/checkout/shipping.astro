@@ -1,0 +1,555 @@
+---
+import Layout from "~/layouts/Base.astro";
+import StepIndicator from "~/components/checkout/StepIndicator.astro";
+import OrderSummary from "~/components/checkout/OrderSummary.astro";
+import AddressForm from "~/components/checkout/AddressForm.astro";
+import { CART_COOKIE_NAME } from "~/lib/queries-cart";
+import { getCustomerToken } from "~/lib/auth";
+import { getCustomer, type CustomerT, type CustomerAddressT } from "~/lib/queries-customer";
+import {
+  countries,
+  friendlyCheckoutError,
+  getCartForCheckout,
+  setGuestEmailOnCart,
+  setShippingAddressesOnCart,
+  setShippingMethodsOnCart,
+  type CheckoutAddressInput,
+  type CheckoutCartT,
+  type CheckoutCountryT,
+} from "~/lib/queries-checkout";
+import { z } from "zod";
+
+/**
+ * /checkout/shipping — step 1 of the React checkout.
+ *
+ * Left column:
+ *   - Guest: email + address form.
+ *   - Signed-in: radio-list of saved addresses + "New address" + address form
+ *     (revealed when "New address" is selected).
+ *   - Below the address: shipping method radios, populated from the cart's
+ *     `available_shipping_methods` once an address is committed.
+ *
+ * Right column: OrderSummary.
+ *
+ * Form POST targets this same URL; we dispatch by the hidden `_action` input:
+ *   - `select-saved-address` — pick a saved address; re-renders with methods.
+ *   - `save-address` — persist new address, re-render with methods.
+ *   - `select-shipping-method` — persist method, redirect to /checkout/payment.
+ */
+export const prerender = false;
+
+const cartId = Astro.cookies.get(CART_COOKIE_NAME)?.value ?? null;
+if (!cartId) {
+  return Astro.redirect("/checkout/cart", 303);
+}
+
+const token = getCustomerToken(Astro);
+
+// Snapshot of customer data (saved addresses, email).
+let customer: CustomerT | null = null;
+if (token) {
+  try {
+    customer = await getCustomer(token);
+  } catch {
+    customer = null;
+  }
+}
+
+// State bag for re-rendering after a POST validation failure.
+let formValues: Record<string, string> = {};
+let formErrors: Record<string, string> = {};
+let emailError: string | null = null;
+let topLevelError: string | null = null;
+let selectedSavedAddressId: number | null = null;
+// Whether to force the "New Address" panel open (guests always see it;
+// signed-in customers toggle via radio).
+let showNewAddressForm = !customer;
+let methodError: string | null = null;
+
+/* -------------------------------------------------------------------------- */
+/* Validation                                                                  */
+/* -------------------------------------------------------------------------- */
+
+const AddressSchema = z.object({
+  firstname: z.string().trim().min(1, "Please enter a first name.").max(128),
+  lastname: z.string().trim().min(1, "Please enter a last name.").max(128),
+  street0: z.string().trim().min(1, "Please enter a street address.").max(255),
+  street1: z.string().trim().max(255).optional().or(z.literal("")),
+  city: z.string().trim().min(1, "Please enter a city.").max(128),
+  country_code: z.string().trim().length(2, "Please select a country."),
+  region_id: z.string().trim().optional().or(z.literal("")),
+  region: z.string().trim().max(128).optional().or(z.literal("")),
+  postcode: z.string().trim().min(1, "Please enter a postal code.").max(32),
+  telephone: z.string().trim().min(1, "Please enter a phone number.").max(32),
+});
+
+const EmailSchema = z.string().trim().email("Please enter a valid email address.");
+
+function pickAddressValues(form: FormData): Record<string, string> {
+  return {
+    firstname: String(form.get("firstname") ?? "").trim(),
+    lastname: String(form.get("lastname") ?? "").trim(),
+    street0: String(form.get("street0") ?? "").trim(),
+    street1: String(form.get("street1") ?? "").trim(),
+    city: String(form.get("city") ?? "").trim(),
+    country_code: String(form.get("country_code") ?? "").trim().toUpperCase(),
+    region_id: String(form.get("region_id") ?? "").trim(),
+    region: String(form.get("region") ?? "").trim(),
+    postcode: String(form.get("postcode") ?? "").trim(),
+    telephone: String(form.get("telephone") ?? "").trim(),
+  };
+}
+
+function addressFromValues(v: Record<string, string>): CheckoutAddressInput {
+  const street = [v.street0 ?? "", v.street1 ?? ""].filter((s) => s.length > 0);
+  const region: CheckoutAddressInput["region"] = {};
+  const regionIdNum = v.region_id ? Number.parseInt(v.region_id, 10) : NaN;
+  if (Number.isFinite(regionIdNum) && regionIdNum > 0) {
+    region.region_id = regionIdNum;
+  } else if (v.region) {
+    region.region = v.region;
+  }
+  return {
+    firstname: v.firstname ?? "",
+    lastname: v.lastname ?? "",
+    street,
+    city: v.city ?? "",
+    region,
+    postcode: v.postcode ?? "",
+    country_code: v.country_code ?? "US",
+    telephone: v.telephone ?? "",
+    save_in_address_book: false,
+  };
+}
+
+function savedAddressToInput(a: CustomerAddressT): CheckoutAddressInput {
+  return {
+    firstname: a.firstname ?? "",
+    lastname: a.lastname ?? "",
+    street: (a.street ?? []).filter((s): s is string => typeof s === "string" && s.length > 0),
+    city: a.city ?? "",
+    postcode: a.postcode ?? "",
+    country_code: a.country_code ?? "US",
+    telephone: a.telephone ?? "",
+    region: a.region?.region_id
+      ? { region_id: a.region.region_id }
+      : a.region?.region
+        ? { region: a.region.region }
+        : {},
+    save_in_address_book: false,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* POST handling                                                              */
+/* -------------------------------------------------------------------------- */
+
+if (Astro.request.method === "POST") {
+  try {
+    const form = await Astro.request.formData();
+    const action = String(form.get("_action") ?? "").trim();
+
+    if (action === "select-shipping-method") {
+      const carrier = String(form.get("carrier_code") ?? "").trim();
+      const method = String(form.get("method_code") ?? "").trim();
+      if (!carrier || !method) {
+        methodError = "Please choose a shipping method.";
+      } else {
+        const result = await setShippingMethodsOnCart(
+          cartId,
+          { carrier_code: carrier, method_code: method },
+          token,
+        );
+        if (result.userErrors.length > 0) {
+          methodError = result.userErrors[0]?.message ?? "Couldn't set shipping method.";
+        } else {
+          return Astro.redirect("/checkout/payment", 303);
+        }
+      }
+    } else if (action === "select-saved-address" && customer) {
+      const addrId = Number.parseInt(String(form.get("saved_address_id") ?? ""), 10);
+      const saved = customer.addresses?.find((a) => a.id === addrId) ?? null;
+      if (!saved) {
+        topLevelError = "That address could not be found.";
+      } else {
+        selectedSavedAddressId = addrId;
+        const addr = savedAddressToInput(saved);
+        const result = await setShippingAddressesOnCart(cartId, addr, token, addrId);
+        if (result.userErrors.length > 0) {
+          topLevelError = result.userErrors[0]?.message ?? "Couldn't set address.";
+        }
+      }
+    } else if (action === "save-address") {
+      // Guests must send an email first. If Magento reports the email is
+      // already tied to a customer account we treat it as INFORMATIONAL —
+      // Magento core supports guest checkout with any email by default
+      // (admin toggle: Sales → Checkout → Allow Guest Checkout).
+      let emailOk = true;
+      if (!token) {
+        const emailRaw = String(form.get("email") ?? "").trim();
+        const parsedEmail = EmailSchema.safeParse(emailRaw);
+        if (!parsedEmail.success) {
+          emailError = parsedEmail.error.issues[0]?.message ?? "Please enter a valid email address.";
+          emailOk = false;
+        } else {
+          try {
+            const emailResult = await setGuestEmailOnCart(cartId, parsedEmail.data);
+            if (emailResult.userErrors.length > 0) {
+              const msg = (emailResult.userErrors[0]?.message ?? "").toLowerCase();
+              // Allow guest checkout with a known-account email — Magento's
+              // default behaviour.
+              if (!msg.includes("already") && !msg.includes("assigned")) {
+                emailError = emailResult.userErrors[0]?.message ?? null;
+                emailOk = false;
+              }
+            }
+          } catch (err) {
+            const raw = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+            if (!raw.includes("already") && !raw.includes("assigned")) {
+              emailError = friendlyCheckoutError(err);
+              emailOk = false;
+            }
+          }
+        }
+        formValues.email = emailRaw;
+      }
+
+      const values = pickAddressValues(form);
+      formValues = { ...formValues, ...values };
+      showNewAddressForm = true;
+      const parsed = AddressSchema.safeParse(values);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) {
+          const k = issue.path[0];
+          if (typeof k === "string" && !formErrors[k]) formErrors[k] = issue.message;
+        }
+      } else if (emailOk) {
+        const input = addressFromValues(values);
+        input.save_in_address_book = form.get("save_in_address_book") === "1";
+        try {
+          const result = await setShippingAddressesOnCart(cartId, input, token);
+          if (result.userErrors.length > 0) {
+            topLevelError = result.userErrors[0]?.message ?? "Couldn't save address.";
+          }
+        } catch (err) {
+          topLevelError = friendlyCheckoutError(err);
+        }
+      }
+    }
+  } catch (err) {
+    topLevelError = friendlyCheckoutError(err);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Fetch cart + countries for render                                          */
+/* -------------------------------------------------------------------------- */
+
+let cart: CheckoutCartT | null = null;
+let countryList: CheckoutCountryT[] = [];
+let fetchFailed = false;
+
+try {
+  const [c, countriesData] = await Promise.all([
+    getCartForCheckout(cartId, token),
+    countries(),
+  ]);
+  cart = c;
+  countryList = countriesData;
+} catch {
+  fetchFailed = true;
+}
+
+if (!cart || cart.total_quantity === 0) {
+  return Astro.redirect("/checkout/cart", 303);
+}
+
+// If the user has already placed a shipping address + selected method earlier
+// in this session, preserve that state in UI but still let them change it.
+const primaryShipping = cart.shipping_addresses?.[0] ?? null;
+const hasShippingAddressOnCart =
+  primaryShipping != null && primaryShipping.country?.code != null;
+
+const availableMethods = (primaryShipping?.available_shipping_methods ?? [])
+  .filter((m): m is NonNullable<typeof m> => m != null)
+  .filter((m) => m.available !== false);
+
+const selectedMethod = primaryShipping?.selected_shipping_method ?? null;
+
+const savedAddresses = customer?.addresses ?? [];
+const defaultShippingId =
+  savedAddresses.find((a) => a.default_shipping)?.id ?? savedAddresses[0]?.id ?? null;
+
+if (selectedSavedAddressId == null && defaultShippingId != null) {
+  selectedSavedAddressId = defaultShippingId;
+}
+
+// On GET (initial render), pre-populate the form from any shipping address
+// already on the cart. On POST the page has already captured the user's own
+// input in `formValues`, so don't overwrite.
+if (
+  Astro.request.method !== "POST" &&
+  Object.keys(formValues).length === 0 &&
+  primaryShipping != null
+) {
+  const s = primaryShipping;
+  const street = (s.street ?? []).filter((x): x is string => typeof x === "string");
+  formValues = {
+    firstname: s.firstname ?? "",
+    lastname: s.lastname ?? "",
+    street0: street[0] ?? "",
+    street1: street[1] ?? "",
+    city: s.city ?? "",
+    country_code: s.country?.code ?? "US",
+    region_id: s.region?.region_id != null ? String(s.region.region_id) : "",
+    region: s.region?.label ?? "",
+    postcode: s.postcode ?? "",
+    telephone: s.telephone ?? "",
+  };
+}
+
+const guestEmailValue = (formValues.email ?? cart.email ?? "").toString();
+---
+
+<Layout title="Shipping" description="Choose your shipping address" noindex>
+  <StepIndicator step="shipping" />
+
+  <h1 class="mb-6 text-3xl font-bold tracking-tight">Shipping</h1>
+
+  {fetchFailed && (
+    <p class="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+      We couldn't reach the server. Please try refreshing the page.
+    </p>
+  )}
+
+  {topLevelError && (
+    <p class="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">
+      {topLevelError}
+    </p>
+  )}
+
+  <div class="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_360px]">
+    <section class="flex flex-col gap-8">
+      {customer && savedAddresses.length > 0 && (
+        <form method="POST" class="rounded-xl border border-zinc-200 bg-white p-6">
+          <input type="hidden" name="_action" value="select-saved-address" />
+          <h2 class="mb-4 text-lg font-semibold text-zinc-900">Your Addresses</h2>
+          <div class="flex flex-col gap-3">
+            {savedAddresses.map((a) => (
+              <label class={[
+                "block rounded-lg border p-4 transition cursor-pointer",
+                selectedSavedAddressId === a.id
+                  ? "border-[var(--color-brand)] bg-zinc-50"
+                  : "border-zinc-200 bg-white hover:border-zinc-300",
+              ].join(" ")}>
+                <div class="flex items-start gap-3">
+                  <input
+                    type="radio"
+                    name="saved_address_id"
+                    value={a.id}
+                    checked={selectedSavedAddressId === a.id}
+                    class="mt-1 h-4 w-4"
+                  />
+                  <div class="text-sm">
+                    <p class="font-medium text-zinc-900">
+                      {a.firstname} {a.lastname}
+                      {a.default_shipping && (
+                        <span class="ml-2 rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600">
+                          Default
+                        </span>
+                      )}
+                    </p>
+                    <p class="text-zinc-600">
+                      {(a.street ?? []).filter(Boolean).join(", ")}
+                    </p>
+                    <p class="text-zinc-600">
+                      {[a.city, a.region?.region, a.postcode].filter(Boolean).join(", ")}
+                    </p>
+                    <p class="text-zinc-600">{a.country_code}</p>
+                    <p class="text-zinc-600">{a.telephone}</p>
+                  </div>
+                </div>
+              </label>
+            ))}
+          </div>
+          <div class="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              type="submit"
+              class="inline-flex items-center rounded-full bg-zinc-900 px-5 py-2 text-sm font-semibold text-white hover:bg-zinc-800"
+            >
+              Use this address
+            </button>
+            <button
+              type="button"
+              id="toggle-new-address"
+              class="inline-flex items-center rounded-full border border-zinc-300 px-5 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+            >
+              <i class="bi bi-plus-lg mr-1" aria-hidden="true"></i>
+              New address
+            </button>
+          </div>
+        </form>
+      )}
+
+      <form
+        method="POST"
+        class={[
+          "rounded-xl border border-zinc-200 bg-white p-6",
+          showNewAddressForm ? "" : "hidden",
+        ].join(" ")}
+        id="new-address-form"
+        novalidate
+      >
+        <input type="hidden" name="_action" value="save-address" />
+        <h2 class="mb-4 text-lg font-semibold text-zinc-900">
+          {customer ? "Ship to a New Address" : "Shipping Address"}
+        </h2>
+
+        <AddressForm
+          countries={countryList}
+          values={formValues}
+          errors={formErrors}
+          showEmailField={!customer}
+          emailValue={guestEmailValue}
+          emailError={emailError}
+          showSaveInAddressBook={!!customer}
+          heading={null}
+          prefix="ship"
+        />
+
+        <div class="mt-6 flex justify-end">
+          <button
+            type="submit"
+            class="inline-flex items-center rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800"
+          >
+            Save Address
+          </button>
+        </div>
+      </form>
+
+      {hasShippingAddressOnCart && (
+        <form method="POST" class="rounded-xl border border-zinc-200 bg-white p-6">
+          <input type="hidden" name="_action" value="select-shipping-method" />
+          <h2 class="mb-4 text-lg font-semibold text-zinc-900">Shipping Method</h2>
+
+          {methodError && (
+            <p class="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">
+              {methodError}
+            </p>
+          )}
+
+          {availableMethods.length === 0 ? (
+            <p class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              No shipping methods are available for the address you provided.
+              Please double-check the country, region, and postal code.
+            </p>
+          ) : (
+            <div class="flex flex-col gap-3">
+              {availableMethods.map((m) => {
+                const compoundValue = `${m.carrier_code}|${m.method_code ?? ""}`;
+                const isChecked =
+                  selectedMethod?.carrier_code === m.carrier_code &&
+                  selectedMethod?.method_code === m.method_code;
+                return (
+                  <label class={[
+                    "flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition",
+                    isChecked
+                      ? "border-[var(--color-brand)] bg-zinc-50"
+                      : "border-zinc-200 bg-white hover:border-zinc-300",
+                  ].join(" ")}>
+                    <input
+                      type="radio"
+                      name="shipping_method"
+                      value={compoundValue}
+                      checked={isChecked}
+                      required
+                      class="mt-1 h-4 w-4"
+                      data-carrier={m.carrier_code}
+                      data-method={m.method_code ?? ""}
+                    />
+                    <div class="flex-1 text-sm">
+                      <p class="font-medium text-zinc-900">
+                        {m.carrier_title ?? m.carrier_code}
+                        {m.method_title && m.method_title !== m.carrier_title && (
+                          <span class="ml-1 font-normal text-zinc-600">— {m.method_title}</span>
+                        )}
+                      </p>
+                      {m.error_message && (
+                        <p class="mt-1 text-xs text-red-600">{m.error_message}</p>
+                      )}
+                    </div>
+                    <div class="text-sm font-semibold text-zinc-900">
+                      {m.amount.value != null && m.amount.value > 0
+                        ? new Intl.NumberFormat("en-US", { style: "currency", currency: m.amount.currency ?? "USD" }).format(m.amount.value)
+                        : "Free"}
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Split the compound value back into carrier_code + method_code
+              on submit so the server can validate each independently. */}
+          <input type="hidden" name="carrier_code" value="" />
+          <input type="hidden" name="method_code" value="" />
+
+          <div class="mt-6 flex items-center justify-between">
+            <a
+              href="/checkout/cart"
+              class="text-sm font-medium text-zinc-600 hover:text-zinc-900"
+            >
+              Back to cart
+            </a>
+            <button
+              type="submit"
+              disabled={availableMethods.length === 0}
+              class="inline-flex items-center rounded-full bg-[var(--color-brand)] px-6 py-2.5 text-sm font-semibold text-white hover:bg-[var(--color-brand-dark)] disabled:cursor-not-allowed disabled:bg-zinc-300"
+            >
+              Continue to Payment
+              <i class="bi bi-arrow-right ml-2" aria-hidden="true"></i>
+            </button>
+          </div>
+        </form>
+      )}
+    </section>
+
+    <aside>
+      <OrderSummary cart={cart} />
+    </aside>
+  </div>
+</Layout>
+
+<script is:inline data-astro-rerun>
+  // "New address" toggle for signed-in customers.
+  (function () {
+    const toggle = document.getElementById("toggle-new-address");
+    const form = document.getElementById("new-address-form");
+    if (toggle && form) {
+      toggle.addEventListener("click", () => {
+        form.classList.toggle("hidden");
+        if (!form.classList.contains("hidden")) {
+          form.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      });
+    }
+    // Split compound shipping-method value into carrier + method on submit.
+    const methodForm = document.querySelector('form input[value="select-shipping-method"]');
+    if (methodForm && methodForm instanceof HTMLInputElement) {
+      const form = methodForm.form;
+      if (form) {
+        form.addEventListener("submit", (e) => {
+          const selected = form.querySelector('input[name="shipping_method"]:checked');
+          if (selected instanceof HTMLInputElement) {
+            const carrier = selected.getAttribute("data-carrier") || "";
+            const method = selected.getAttribute("data-method") || "";
+            const carrierInput = form.querySelector('input[name="carrier_code"]');
+            const methodInput = form.querySelector('input[name="method_code"]');
+            if (carrierInput instanceof HTMLInputElement) carrierInput.value = carrier;
+            if (methodInput instanceof HTMLInputElement) methodInput.value = method;
+          }
+        });
+      }
+    }
+  })();
+</script>

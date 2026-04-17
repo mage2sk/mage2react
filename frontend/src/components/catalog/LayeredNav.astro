@@ -1,0 +1,235 @@
+---
+/**
+ * <LayeredNav/> — server-rendered layered navigation (left filter rail).
+ *
+ * Zero client JS. Every option is a plain `<a href="…">` — Astro's
+ * <ClientRouter/> in Base.astro makes the subsequent full-page nav feel SPA-like
+ * via View Transitions.
+ *
+ * Mobile: the whole rail is wrapped in `<details>` so it collapses on small
+ * viewports; if you want a richer drawer UX, drop in `<LayeredNavMobile/>`.
+ *
+ * Visual rules:
+ *   - `color` / `swatch_*` attributes render as swatch circles.
+ *   - `size` renders as pills.
+ *   - Everything else renders as a checkbox list.
+ *   - `price` renders as a list of Magento-style buckets ($20 – $30).
+ *   - `category_uid` is skipped (not useful to expose as a filter here).
+ */
+
+import type { AggregationT, AggregationOptionT } from "~/lib/queries-catalog";
+import {
+  toggleMultiValue,
+  buildHref,
+  hasValue,
+  setParam,
+  parsePriceBucket,
+} from "~/lib/url-filters";
+
+export interface Props {
+  aggregations: AggregationT[];
+  activeFilters: URLSearchParams;
+  basePath: string;
+  /** Optional CSS class added to the root `<nav>`; defaults to desktop-only visibility. */
+  class?: string;
+}
+
+const { aggregations, activeFilters, basePath } = Astro.props;
+const rootClass = Astro.props.class ?? "hidden lg:block";
+
+const HIDDEN_CODES = new Set(["category_uid", "category_id"]);
+
+// Stable display order — merchant-configured position first, fall back to label.
+const visible = aggregations
+  .filter((a) => !HIDDEN_CODES.has(a.attribute_code))
+  .filter((a) => a.options.length > 0)
+  .slice()
+  .sort((a, b) => {
+    const pa = a.position ?? 9999;
+    const pb = b.position ?? 9999;
+    if (pa !== pb) return pa - pb;
+    return (a.label ?? a.attribute_code).localeCompare(b.label ?? b.attribute_code);
+  });
+
+type Kind = "color" | "size" | "price" | "checkbox";
+
+function kindFor(code: string): Kind {
+  const c = code.toLowerCase();
+  if (c === "price") return "price";
+  if (c === "color" || c.includes("color") || c.includes("swatch")) return "color";
+  if (c === "size") return "size";
+  return "checkbox";
+}
+
+/**
+ * Best-effort CSS colour from a label ("Red", "Navy Blue", "#ff0000").
+ * We don't have the Magento swatch colour mapping on aggregation options
+ * (that data only comes back in configurable_options), so we fall back to
+ * a label→CSS-colour guess. Unknown labels get a neutral grey tile with
+ * the first letter shown — visually close to Luma's fallback swatch.
+ */
+function guessColor(label: string | null): { css: string | null; label: string } {
+  if (!label) return { css: null, label: "" };
+  if (label.startsWith("#")) return { css: label, label };
+  const map: Record<string, string> = {
+    black: "#000000", white: "#ffffff", red: "#dc2626", blue: "#2563eb",
+    green: "#16a34a", yellow: "#eab308", orange: "#f97316", purple: "#9333ea",
+    pink: "#ec4899", grey: "#6b7280", gray: "#6b7280", brown: "#78350f",
+    navy: "#1e3a8a", beige: "#d6c8ae", cream: "#f5ebd6", tan: "#d2b48c",
+    khaki: "#bdb76b", olive: "#556b2f", maroon: "#7f1d1d", teal: "#0f766e",
+    gold: "#d4af37", silver: "#c0c0c0",
+  };
+  const key = label.toLowerCase();
+  const direct = map[key];
+  if (direct) return { css: direct, label };
+  // Multi-word: match the first token.
+  const first = key.split(/\s+/)[0] ?? "";
+  const mapped = first ? map[first] : undefined;
+  if (mapped) return { css: mapped, label };
+  return { css: null, label };
+}
+
+interface OptionLink {
+  option: AggregationOptionT;
+  href: string;
+  active: boolean;
+  displayLabel: string;
+}
+
+function linksFor(code: string, kind: Kind, options: AggregationOptionT[]): OptionLink[] {
+  return options.map((option) => {
+    if (kind === "price") {
+      const { urlValue, displayLabel } = parsePriceBucket(option.value);
+      // Price is single-select: toggling the same value removes it, any other
+      // value replaces.
+      const isActive = (activeFilters.get("price") ?? "") === urlValue;
+      const next = isActive
+        ? setParam(activeFilters, "price", "", { resetPage: true })
+        : setParam(activeFilters, "price", urlValue, { resetPage: true });
+      return {
+        option,
+        href: buildHref(basePath, next),
+        active: isActive,
+        displayLabel: option.label && option.label !== option.value
+          ? option.label
+          : displayLabel,
+      };
+    }
+    const active = hasValue(activeFilters, code, option.value);
+    const next = toggleMultiValue(activeFilters, code, option.value);
+    return {
+      option,
+      href: buildHref(basePath, next),
+      active,
+      displayLabel: option.label ?? option.value,
+    };
+  });
+}
+---
+<nav class:list={[rootClass]} aria-label="Product filters">
+  <div class="mb-3 flex items-center justify-between">
+    <h2 class="text-sm font-semibold tracking-wide text-zinc-900 uppercase">Shop By</h2>
+  </div>
+
+  {visible.length === 0 && (
+    <p class="text-sm text-zinc-500">No filters available.</p>
+  )}
+
+  <div class="divide-y divide-zinc-200 border-y border-zinc-200">
+    {visible.map((agg) => {
+      const kind = kindFor(agg.attribute_code);
+      const title = agg.label ?? agg.attribute_code;
+      const links = linksFor(agg.attribute_code, kind, agg.options);
+      return (
+        <details open class="group py-3">
+          <summary class="flex cursor-pointer items-center justify-between gap-2 text-sm font-medium text-zinc-900 outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]">
+            <span>{title}</span>
+            <span class="text-zinc-400 transition group-open:rotate-180" aria-hidden="true">▾</span>
+          </summary>
+
+          <ul
+            class:list={[
+              "mt-3 space-y-1.5",
+              kind === "color" && "grid grid-cols-6 gap-2 space-y-0",
+              kind === "size" && "flex flex-wrap gap-2 space-y-0",
+            ]}
+            role="group"
+            aria-label={title}
+          >
+            {links.map((opt) => {
+              if (kind === "color") {
+                const { css, label } = guessColor(opt.displayLabel);
+                return (
+                  <li>
+                    <a
+                      href={opt.href}
+                      aria-pressed={opt.active ? "true" : "false"}
+                      title={`${opt.displayLabel}${opt.option.count != null ? ` (${opt.option.count})` : ""}`}
+                      class:list={[
+                        "flex h-8 w-8 items-center justify-center rounded-full border text-[10px] font-semibold transition hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]",
+                        opt.active ? "border-zinc-900 ring-2 ring-zinc-900 ring-offset-2" : "border-zinc-300",
+                      ]}
+                      style={css ? `background-color: ${css};` : undefined}
+                    >
+                      {!css && <span class="text-zinc-700">{(label[0] ?? "?").toUpperCase()}</span>}
+                      <span class="sr-only">{opt.displayLabel}{opt.option.count != null ? ` (${opt.option.count})` : ""}</span>
+                    </a>
+                  </li>
+                );
+              }
+              if (kind === "size") {
+                return (
+                  <li>
+                    <a
+                      href={opt.href}
+                      aria-pressed={opt.active ? "true" : "false"}
+                      class:list={[
+                        "inline-flex min-w-[2.5rem] items-center justify-center rounded-md border px-3 py-1.5 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]",
+                        opt.active
+                          ? "border-zinc-900 bg-zinc-900 text-white"
+                          : "border-zinc-300 bg-white text-zinc-800 hover:border-zinc-900",
+                      ]}
+                    >
+                      {opt.displayLabel}
+                      {opt.option.count != null && (
+                        <span class="ml-1 text-[10px] text-zinc-500">({opt.option.count})</span>
+                      )}
+                    </a>
+                  </li>
+                );
+              }
+              return (
+                <li>
+                  <a
+                    href={opt.href}
+                    aria-pressed={opt.active ? "true" : "false"}
+                    class:list={[
+                      "group/item flex items-center justify-between gap-2 rounded px-1 py-1 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]",
+                      opt.active ? "font-semibold text-zinc-900" : "text-zinc-700 hover:text-zinc-900",
+                    ]}
+                  >
+                    <span class="inline-flex items-center gap-2">
+                      <span
+                        aria-hidden="true"
+                        class:list={[
+                          "inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border",
+                          opt.active ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-300 bg-white",
+                        ]}
+                      >
+                        {opt.active && <span class="text-[10px] leading-none">✓</span>}
+                      </span>
+                      <span>{opt.displayLabel}</span>
+                    </span>
+                    {opt.option.count != null && (
+                      <span class="text-xs text-zinc-500">({opt.option.count})</span>
+                    )}
+                  </a>
+                </li>
+              );
+            })}
+          </ul>
+        </details>
+      );
+    })}
+  </div>
+</nav>

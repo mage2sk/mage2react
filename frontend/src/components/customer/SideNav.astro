@@ -1,0 +1,59 @@
+---
+/**
+ * Left rail nav for every page under `/customer/`. Mirrors Luma's
+ * account sidebar (Dashboard, Orders, Addresses, Account Info, Newsletter,
+ * Wishlist, Sign Out) so third-party integrations that deep-link into
+ * these paths keep working.
+ */
+type Props = {
+  current?: string;
+};
+
+const { current } = Astro.props as Props;
+const pathname = current ?? Astro.url.pathname;
+
+const links = [
+  { href: "/customer/account", label: "Account Dashboard", icon: "bi-speedometer2", match: /^\/customer\/account\/?$/ },
+  { href: "/sales/order/history", label: "My Orders", icon: "bi-bag", match: /^\/sales\/order/ },
+  { href: "/customer/address", label: "Address Book", icon: "bi-geo-alt", match: /^\/customer\/address/ },
+  { href: "/customer/account/edit", label: "Account Information", icon: "bi-person-gear", match: /^\/customer\/account\/edit/ },
+  { href: "/customer/account/edit?newsletter=1", label: "Newsletter Subscriptions", icon: "bi-envelope", match: /newsletter=1/ },
+  { href: "/wishlist", label: "My Wishlist", icon: "bi-heart", match: /^\/wishlist/ },
+  { href: "/customer/account/logout", label: "Sign Out", icon: "bi-box-arrow-right", match: /^\/customer\/account\/logout/ },
+] as const;
+
+const onNewsletter = Astro.url.search.includes("newsletter=1");
+function isActive(match: RegExp): boolean {
+  const src = match.source;
+  if (src.includes("newsletter=1")) return onNewsletter;
+  // Account Information and Newsletter share the same path; only one should
+  // light up at a time.
+  if (src.includes("customer\\/account\\/edit") && onNewsletter) return false;
+  return match.test(pathname);
+}
+---
+<nav aria-label="Account navigation" class="rounded-xl bg-zinc-50 p-4 md:p-5">
+  <h2 class="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">My Account</h2>
+  <ul class="flex flex-col gap-1">
+    {links.map((l) => {
+      const active = isActive(l.match);
+      return (
+        <li>
+          <a
+            href={l.href}
+            aria-current={active ? "page" : undefined}
+            class={[
+              "flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition",
+              active
+                ? "bg-white font-semibold text-zinc-900 shadow-sm"
+                : "text-zinc-700 hover:bg-white hover:text-zinc-900",
+            ].join(" ")}
+          >
+            <i class={`bi ${l.icon}`} aria-hidden="true"></i>
+            <span>{l.label}</span>
+          </a>
+        </li>
+      );
+    })}
+  </ul>
+</nav>

@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:framework:ObjectManager/etc/config.xsd">
+    <!--
+        Attach the CORS plugin to the GraphQL front controller. afterDispatch
+        runs after the GraphQL response object is built but before Magento
+        sends it, so headers set here reach the client.
+    -->
+    <type name="Magento\GraphQl\Controller\GraphQl">
+        <plugin name="panth_react_graphql_cors"
+                type="Panth\React\Plugin\Cors\AddCorsHeaders"
+                sortOrder="10"
+                disabled="false"/>
+    </type>
+</config>

@@ -1,0 +1,147 @@
+---
+import Layout from "~/layouts/Base.astro";
+import FormField from "~/components/customer/FormField.astro";
+import FlashMessage from "~/components/customer/FlashMessage.astro";
+import {
+  createCustomerToken,
+  friendlyAuthError,
+} from "~/lib/queries-customer";
+import {
+  getCustomerToken,
+  setCustomerToken,
+  sanitizeReturnPath,
+} from "~/lib/auth";
+import { z } from "zod";
+
+// Already signed in? Bounce to the dashboard.
+if (getCustomerToken(Astro)) {
+  return Astro.redirect("/customer/account", 303);
+}
+
+const LoginSchema = z.object({
+  email: z.string().trim().email("Please enter a valid email address."),
+  password: z.string().min(1, "Please enter your password."),
+});
+
+let email = "";
+let errors: Record<string, string> = {};
+let globalError: string | null = null;
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  email = String(form.get("email") ?? "");
+  const password = String(form.get("password") ?? "");
+
+  const parsed = LoginSchema.safeParse({ email, password });
+  if (!parsed.success) {
+    for (const issue of parsed.error.issues) {
+      const key = issue.path[0];
+      if (typeof key === "string" && !errors[key]) errors[key] = issue.message;
+    }
+  } else {
+    try {
+      const token = await createCustomerToken(parsed.data.email, parsed.data.password);
+      setCustomerToken(Astro, token);
+      const rawReturn = Astro.url.searchParams.get("return");
+      const returnPath = sanitizeReturnPath(rawReturn);
+      return Astro.redirect(returnPath, 303);
+    } catch (err) {
+      // Never reflect the raw Magento error — it can leak PII or stack traces.
+      console.warn("[customer-login] failed attempt", {
+        email: parsed.data.email,
+        message: err instanceof Error ? err.message : String(err),
+      });
+      globalError = friendlyAuthError(err);
+    }
+  }
+}
+
+const rawReturn = Astro.url.searchParams.get("return");
+const returnParam = sanitizeReturnPath(rawReturn);
+const createHref =
+  returnParam && returnParam !== "/customer/account"
+    ? `/customer/account/create?return=${encodeURIComponent(returnParam)}`
+    : "/customer/account/create";
+---
+<Layout title="Customer Login" description="Sign in to your account" noindex>
+  <div class="mx-auto w-full max-w-5xl">
+    <h1 class="mb-2 text-3xl font-bold tracking-tight sm:text-4xl">Customer Login</h1>
+    <p class="mb-8 text-sm text-zinc-600">Sign in to manage your account and orders.</p>
+
+    <FlashMessage />
+    {globalError && <FlashMessage message={globalError} variant="error" />}
+
+    <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
+      <section class="rounded-xl border border-zinc-200 bg-white p-6">
+        <h2 class="mb-4 text-lg font-semibold">Registered Customers</h2>
+        <p class="mb-4 text-sm text-zinc-600">
+          If you have an account, sign in with your email address.
+        </p>
+        <form method="post" class="flex flex-col gap-4" novalidate>
+          <FormField
+            id="login-email"
+            name="email"
+            label="Email"
+            type="email"
+            value={email}
+            required
+            autocomplete="email"
+            error={errors.email ?? null}
+          />
+          <FormField
+            id="login-password"
+            name="password"
+            label="Password"
+            type="password"
+            required
+            autocomplete="current-password"
+            error={errors.password ?? null}
+          />
+          <div class="flex items-center justify-between gap-4 pt-2">
+            <button
+              type="submit"
+              id="login-submit"
+              class="inline-flex items-center justify-center rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
+            >
+              <span data-idle>Sign In</span>
+              <span data-busy hidden>Signing in…</span>
+            </button>
+            <a
+              href="/customer/account/forgotpassword"
+              class="text-sm font-medium text-zinc-600 underline-offset-4 hover:underline"
+            >
+              Forgot Your Password?
+            </a>
+          </div>
+        </form>
+      </section>
+
+      <section class="rounded-xl border border-zinc-200 bg-zinc-50 p-6">
+        <h2 class="mb-4 text-lg font-semibold">New Customers</h2>
+        <p class="mb-4 text-sm text-zinc-600">
+          Creating an account has many benefits: check out faster, keep more than
+          one address, track orders and more.
+        </p>
+        <a
+          href={createHref}
+          class="inline-flex items-center justify-center rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-zinc-800"
+        >
+          Create an Account
+        </a>
+      </section>
+    </div>
+  </div>
+</Layout>
+
+<script>
+  // Small progressive-enhancement: flip button label while the form POSTs.
+  const form = document.querySelector("form");
+  const btn = document.getElementById("login-submit") as HTMLButtonElement | null;
+  if (form && btn) {
+    form.addEventListener("submit", () => {
+      btn.disabled = true;
+      btn.querySelector("[data-idle]")?.setAttribute("hidden", "");
+      btn.querySelector("[data-busy]")?.removeAttribute("hidden");
+    });
+  }
+</script>

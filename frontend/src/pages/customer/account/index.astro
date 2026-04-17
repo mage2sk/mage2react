@@ -1,0 +1,213 @@
+---
+import AccountLayout from "~/components/customer/AccountLayout.astro";
+import {
+  getCustomer,
+  getCustomerOrders,
+} from "~/lib/queries-customer";
+import { clearCustomerToken, requireAuth } from "~/lib/auth";
+import { formatMoney } from "~/lib/money";
+
+const auth = requireAuth(Astro);
+if (auth instanceof Response) return auth;
+const token = auth;
+
+let customer;
+let orders;
+try {
+  [customer, orders] = await Promise.all([
+    getCustomer(token),
+    getCustomerOrders(token, { page: 1, pageSize: 5 }),
+  ]);
+} catch (err) {
+  console.warn("[customer-dashboard] failed", {
+    message: err instanceof Error ? err.message : String(err),
+  });
+  // If Magento rejects the token, treat as session expired and log out.
+  clearCustomerToken(Astro);
+  return Astro.redirect("/customer/account/login?flash=session_expired", 303);
+}
+
+const fullName = [customer.firstname, customer.lastname].filter(Boolean).join(" ");
+
+const defaultShippingId = customer.default_shipping
+  ? Number.parseInt(customer.default_shipping, 10)
+  : null;
+const defaultBillingId = customer.default_billing
+  ? Number.parseInt(customer.default_billing, 10)
+  : null;
+
+const addresses = customer.addresses ?? [];
+const shippingAddress =
+  addresses.find((a) => a.id === defaultShippingId) ??
+  addresses.find((a) => a.default_shipping) ??
+  null;
+const billingAddress =
+  addresses.find((a) => a.id === defaultBillingId) ??
+  addresses.find((a) => a.default_billing) ??
+  null;
+
+function formatAddressLines(addr: typeof addresses[number] | null): string[] {
+  if (!addr) return [];
+  const lines: string[] = [];
+  const name = [addr.firstname, addr.lastname].filter(Boolean).join(" ");
+  if (name) lines.push(name);
+  for (const s of addr.street ?? []) if (s) lines.push(s);
+  const cityLine = [
+    addr.city,
+    [addr.region?.region_code ?? addr.region?.region, addr.postcode].filter(Boolean).join(" "),
+  ]
+    .filter(Boolean)
+    .join(", ");
+  if (cityLine) lines.push(cityLine);
+  if (addr.country_code) lines.push(addr.country_code);
+  if (addr.telephone) lines.push(`T: ${addr.telephone}`);
+  return lines;
+}
+
+function orderDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString();
+  } catch {
+    return iso;
+  }
+}
+---
+<AccountLayout
+  title="My Account"
+  pageHeading="My Account"
+  description="Your account dashboard at a glance."
+>
+  <div class="flex flex-col gap-6">
+    <section class="rounded-xl border border-zinc-200 bg-white p-5">
+      <h2 class="mb-1 text-lg font-semibold">Hello, {customer.firstname ?? "there"}!</h2>
+      <p class="text-sm text-zinc-600">
+        From your My Account Dashboard you can view a snapshot of your recent account activity and
+        update your account information.
+      </p>
+    </section>
+
+    <section>
+      <div class="mb-3 flex items-baseline justify-between">
+        <h2 class="text-lg font-semibold">Account Information</h2>
+      </div>
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <article class="rounded-xl border border-zinc-200 bg-white p-5">
+          <div class="mb-2 flex items-baseline justify-between">
+            <h3 class="text-sm font-semibold">Contact Information</h3>
+            <a href="/customer/account/edit" class="text-xs font-medium text-zinc-600 hover:text-zinc-900">Edit</a>
+          </div>
+          <p class="text-sm text-zinc-700">{fullName || "—"}</p>
+          <p class="text-sm text-zinc-700">{customer.email}</p>
+          <p class="mt-2 text-xs">
+            <a href="/customer/account/edit" class="text-zinc-600 hover:text-zinc-900">Change Password</a>
+          </p>
+        </article>
+        <article class="rounded-xl border border-zinc-200 bg-white p-5">
+          <div class="mb-2 flex items-baseline justify-between">
+            <h3 class="text-sm font-semibold">Newsletter</h3>
+            <a href="/customer/account/edit?newsletter=1" class="text-xs font-medium text-zinc-600 hover:text-zinc-900">Edit</a>
+          </div>
+          <p class="text-sm text-zinc-700">
+            {customer.is_subscribed
+              ? "You are subscribed to our newsletter."
+              : "You are not subscribed to our newsletter."}
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <div class="mb-3 flex items-baseline justify-between">
+        <h2 class="text-lg font-semibold">Address Book</h2>
+        <a href="/customer/address" class="text-sm font-medium text-zinc-600 hover:text-zinc-900">Manage Addresses</a>
+      </div>
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <article class="rounded-xl border border-zinc-200 bg-white p-5">
+          <h3 class="mb-2 text-sm font-semibold">Default Shipping Address</h3>
+          {shippingAddress ? (
+            <address class="not-italic text-sm text-zinc-700">
+              {formatAddressLines(shippingAddress).map((line) => (
+                <div>{line}</div>
+              ))}
+              <p class="mt-2 text-xs">
+                <a href={`/customer/address/edit/${shippingAddress.id}`} class="text-zinc-600 hover:text-zinc-900">Edit Address</a>
+              </p>
+            </address>
+          ) : (
+            <p class="text-sm text-zinc-500">
+              You have not set a default shipping address.
+              <a href="/customer/address/new" class="ml-1 font-medium text-zinc-900 hover:underline">Add one</a>.
+            </p>
+          )}
+        </article>
+        <article class="rounded-xl border border-zinc-200 bg-white p-5">
+          <h3 class="mb-2 text-sm font-semibold">Default Billing Address</h3>
+          {billingAddress ? (
+            <address class="not-italic text-sm text-zinc-700">
+              {formatAddressLines(billingAddress).map((line) => (
+                <div>{line}</div>
+              ))}
+              <p class="mt-2 text-xs">
+                <a href={`/customer/address/edit/${billingAddress.id}`} class="text-zinc-600 hover:text-zinc-900">Edit Address</a>
+              </p>
+            </address>
+          ) : (
+            <p class="text-sm text-zinc-500">
+              You have not set a default billing address.
+              <a href="/customer/address/new" class="ml-1 font-medium text-zinc-900 hover:underline">Add one</a>.
+            </p>
+          )}
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <div class="mb-3 flex items-baseline justify-between">
+        <h2 class="text-lg font-semibold">Recent Orders</h2>
+        <a href="/sales/order/history" class="text-sm font-medium text-zinc-600 hover:text-zinc-900">View All</a>
+      </div>
+      {orders.items.length === 0 ? (
+        <p class="rounded-xl border border-dashed border-zinc-300 p-6 text-center text-sm text-zinc-500">
+          You have placed no orders yet.
+        </p>
+      ) : (
+        <div class="overflow-x-auto rounded-xl border border-zinc-200 bg-white">
+          <table class="min-w-full divide-y divide-zinc-200 text-sm">
+            <thead class="bg-zinc-50 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500">
+              <tr>
+                <th class="px-4 py-3">Order #</th>
+                <th class="px-4 py-3">Date</th>
+                <th class="px-4 py-3">Total</th>
+                <th class="px-4 py-3">Status</th>
+                <th class="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-zinc-200">
+              {orders.items.map((order) => (
+                <tr>
+                  <td class="px-4 py-3 font-medium">{order.number}</td>
+                  <td class="px-4 py-3">{orderDate(order.order_date)}</td>
+                  <td class="px-4 py-3">
+                    {formatMoney(
+                      order.total?.grand_total?.value ?? null,
+                      order.total?.grand_total?.currency ?? null,
+                    )}
+                  </td>
+                  <td class="px-4 py-3 capitalize">{order.status.toLowerCase()}</td>
+                  <td class="px-4 py-3 text-right">
+                    <a
+                      href={`/sales/order/view/${encodeURIComponent(order.number)}`}
+                      class="text-sm font-medium text-zinc-700 hover:text-zinc-900"
+                    >
+                      View Order
+                    </a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  </div>
+</AccountLayout>

@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Store:etc/config.xsd">
+    <default>
+        <panth_react>
+            <frontend>
+                <enabled>1</enabled>
+                <site_url>https://mage2react.local</site_url>
+                <cors_allowed_origins>https://mage2react.local</cors_allowed_origins>
+            </frontend>
+        </panth_react>
+    </default>
+</config>

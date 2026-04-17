@@ -1,0 +1,146 @@
+---
+import AccountLayout from "~/components/customer/AccountLayout.astro";
+import { getCustomerOrders } from "~/lib/queries-customer";
+import { clearCustomerToken, requireAuth } from "~/lib/auth";
+import { formatMoney } from "~/lib/money";
+
+const auth = requireAuth(Astro);
+if (auth instanceof Response) return auth;
+const token = auth;
+
+const rawPage = Astro.url.searchParams.get("p");
+const page = Math.max(1, Number.parseInt(rawPage ?? "1", 10) || 1);
+const pageSize = 10;
+
+let orders;
+try {
+  orders = await getCustomerOrders(token, { page, pageSize });
+} catch (err) {
+  console.warn("[order-history] load failed", {
+    message: err instanceof Error ? err.message : String(err),
+  });
+  clearCustomerToken(Astro);
+  return Astro.redirect("/customer/account/login?flash=session_expired", 303);
+}
+
+function fmtDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString();
+  } catch {
+    return iso;
+  }
+}
+
+function shipTo(o: (typeof orders.items)[number]): string {
+  const s = o.shipping_address;
+  if (!s) return "—";
+  return [s.firstname, s.lastname].filter(Boolean).join(" ") || "—";
+}
+
+function pageHref(p: number): string {
+  const params = new URLSearchParams(Astro.url.search);
+  params.set("p", String(p));
+  return `${Astro.url.pathname}?${params.toString()}`;
+}
+
+const totalPages = orders.totalPages;
+const pages: number[] = [];
+for (let i = 1; i <= totalPages; i++) pages.push(i);
+---
+<AccountLayout title="My Orders" pageHeading="My Orders">
+  {orders.items.length === 0 ? (
+    <p class="rounded-xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500">
+      You have placed no orders.
+    </p>
+  ) : (
+    <>
+      <div class="overflow-x-auto rounded-xl border border-zinc-200 bg-white">
+        <table class="min-w-full divide-y divide-zinc-200 text-sm">
+          <thead class="bg-zinc-50 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500">
+            <tr>
+              <th class="px-4 py-3">Order #</th>
+              <th class="px-4 py-3">Date</th>
+              <th class="px-4 py-3">Ship To</th>
+              <th class="px-4 py-3">Order Total</th>
+              <th class="px-4 py-3">Status</th>
+              <th class="px-4 py-3 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-zinc-200">
+            {orders.items.map((order) => (
+              <tr>
+                <td class="px-4 py-3 font-medium">{order.number}</td>
+                <td class="px-4 py-3">{fmtDate(order.order_date)}</td>
+                <td class="px-4 py-3">{shipTo(order)}</td>
+                <td class="px-4 py-3">
+                  {formatMoney(
+                    order.total?.grand_total?.value ?? null,
+                    order.total?.grand_total?.currency ?? null,
+                  )}
+                </td>
+                <td class="px-4 py-3 capitalize">{order.status.toLowerCase()}</td>
+                <td class="px-4 py-3 text-right">
+                  <div class="flex justify-end gap-3">
+                    <a
+                      href={`/sales/order/view/${encodeURIComponent(order.number)}`}
+                      class="text-sm font-medium text-zinc-700 hover:text-zinc-900"
+                    >
+                      View Order
+                    </a>
+                    <form method="post" action={`/sales/order/view/${encodeURIComponent(order.number)}`}>
+                      <input type="hidden" name="intent" value="reorder" />
+                      <button
+                        type="submit"
+                        class="text-sm font-medium text-zinc-700 hover:text-zinc-900"
+                      >
+                        Reorder
+                      </button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {totalPages > 1 && (
+        <nav aria-label="Pagination" class="mt-6 flex items-center justify-center gap-2">
+          {page > 1 && (
+            <a
+              href={pageHref(page - 1)}
+              class="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm hover:bg-zinc-50"
+            >
+              <i class="bi bi-chevron-left mr-1" aria-hidden="true"></i>Prev
+            </a>
+          )}
+          {pages.map((p) => (
+            p === page ? (
+              <span
+                aria-current="page"
+                class="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-semibold text-white"
+              >
+                {p}
+              </span>
+            ) : (
+              <a
+                href={pageHref(p)}
+                class="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm hover:bg-zinc-50"
+              >
+                {p}
+              </a>
+            )
+          ))}
+          {page < totalPages && (
+            <a
+              href={pageHref(page + 1)}
+              class="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm hover:bg-zinc-50"
+            >
+              Next<i class="bi bi-chevron-right ml-1" aria-hidden="true"></i>
+            </a>
+          )}
+        </nav>
+      )}
+    </>
+  )}
+</AccountLayout>

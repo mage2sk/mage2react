@@ -1,0 +1,150 @@
+---
+/**
+ * <SearchResults/> — /search result page body.
+ *
+ * Reuses the same layered-nav + toolbar + pagination stack as <CategoryGrid/>,
+ * but swaps the heading/breadcrumbs for a search-specific treatment:
+ *   - "Search results for: 'foo'" heading.
+ *   - "Home / Search" breadcrumbs (no category chain).
+ *   - Empty state with a clearer call to action.
+ */
+
+import type { CatalogProductsResultT, SortKey } from "~/lib/queries-catalog";
+import Breadcrumbs from "~/components/seo/Breadcrumbs.astro";
+import ProductCard from "~/components/ProductCard.astro";
+import LayeredNav from "./LayeredNav.astro";
+import ActiveFilters from "./ActiveFilters.astro";
+import Toolbar from "./Toolbar.astro";
+import Pagination from "./Pagination.astro";
+import LayeredNavMobile from "./LayeredNavMobile.tsx";
+import { clearAllFilters, buildHref } from "~/lib/url-filters";
+import type { BreadcrumbItem } from "~/lib/jsonld";
+
+export interface Props {
+  query: string;
+  result: CatalogProductsResultT;
+  searchParams: URLSearchParams;
+  basePath: string;
+  activeSort: SortKey | null;
+  pageSize: number;
+  currentPage: number;
+}
+
+const {
+  query,
+  result,
+  searchParams,
+  basePath,
+  activeSort,
+  pageSize,
+} = Astro.props;
+// `currentPage` is part of Props for API symmetry with CategoryGrid but we read
+// it off `result.page_info` so no local binding is needed.
+
+const SITE_URL = import.meta.env.PUBLIC_SITE_URL || "http://localhost:4321";
+
+const crumbs: BreadcrumbItem[] = [
+  { name: "Home", url: new URL("/", SITE_URL).toString() },
+  { name: "Search", url: new URL(basePath, SITE_URL).toString() },
+];
+
+const clearAllHref = buildHref(basePath, clearAllFilters(searchParams));
+---
+<Breadcrumbs items={crumbs} />
+
+<header class="mb-6 border-b border-zinc-200 pb-4">
+  <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">
+    Search results for: <span class="text-[var(--color-brand)]">{`'${query}'`}</span>
+  </h1>
+  <p class="mt-2 text-sm text-zinc-500">
+    {result.total_count} {result.total_count === 1 ? "match" : "matches"}
+  </p>
+</header>
+
+{result.total_count === 0 ? (
+  <div class="rounded-xl border border-dashed border-zinc-300 p-12 text-center">
+    <p class="text-lg font-semibold text-zinc-900">Your search returned no results.</p>
+    <p class="mt-2 text-sm text-zinc-500">Try a different spelling or more general words.</p>
+    <form action={basePath} method="get" class="mx-auto mt-6 flex max-w-md items-center gap-2">
+      <label class="sr-only" for="search-retry">Search</label>
+      <input
+        id="search-retry"
+        name="q"
+        type="search"
+        placeholder="Try again"
+        class="flex-1 rounded-md border border-zinc-300 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
+      />
+      <button
+        type="submit"
+        class="rounded-md border border-zinc-900 bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800"
+      >
+        Search
+      </button>
+    </form>
+  </div>
+) : (
+  <div class="grid gap-8 lg:grid-cols-[260px_1fr]">
+    <div class="flex items-center gap-3 lg:hidden">
+      <LayeredNavMobile client:idle />
+      <p class="text-sm text-zinc-500">{result.total_count} {result.total_count === 1 ? "item" : "items"}</p>
+    </div>
+
+    <aside>
+      <LayeredNav
+        aggregations={result.aggregations}
+        activeFilters={searchParams}
+        basePath={basePath}
+      />
+      <div data-filter-source hidden>
+        <LayeredNav
+          aggregations={result.aggregations}
+          activeFilters={searchParams}
+          basePath={basePath}
+          class="block"
+        />
+      </div>
+    </aside>
+
+    <section aria-label="Search results grid">
+      <ActiveFilters
+        activeFilters={searchParams}
+        basePath={basePath}
+        aggregations={result.aggregations}
+      />
+
+      <Toolbar
+        totalCount={result.total_count}
+        pageInfo={result.page_info}
+        sortFields={result.sort_fields}
+        activeSort={activeSort}
+        pageSize={pageSize}
+        basePath={basePath}
+        activeFilters={searchParams}
+      />
+
+      {result.items.length === 0 ? (
+        <div class="mt-8 rounded-xl border border-dashed border-zinc-300 p-10 text-center">
+          <p class="text-base font-semibold text-zinc-900">No products match your filters.</p>
+          <a
+            href={clearAllHref}
+            class="mt-4 inline-flex items-center rounded-full border border-zinc-900 px-5 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-900 hover:text-white"
+          >
+            Clear filters
+          </a>
+        </div>
+      ) : (
+        <div class="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
+          {result.items.map((p, idx) => (
+            <ProductCard product={p} eager={idx < 4} />
+          ))}
+        </div>
+      )}
+
+      <Pagination
+        pageInfo={result.page_info}
+        basePath={basePath}
+        activeFilters={searchParams}
+      />
+    </section>
+  </div>
+)}

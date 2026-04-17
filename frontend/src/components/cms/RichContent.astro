@@ -1,0 +1,38 @@
+---
+// [...slug].astro CMS branch integration:
+//   import RichContent from "~/components/cms/RichContent.astro";
+//   <RichContent html={cmsPage.content ?? ""} meta={{ title: cmsPage.title, contentHeading: cmsPage.content_heading }} />
+//
+// Renders Magento CMS page body HTML with Luma-style typography. The input is
+// run through the shared DOMPurify allowlist in `~/lib/sanitize` — Magento CMS
+// widgets (which Magento already expands server-side into `<img>`, `<a>`, etc.)
+// pass through unchanged, while any inline scripts, event handlers, or styles
+// are stripped.
+//
+// The surrounding `<article class="prose ...">` provides Tailwind-typography
+// styles; the heading is rendered outside the sanitized content so a merchant
+// can't accidentally nest a duplicate <h1>.
+import { sanitizeHtml } from "~/lib/sanitize";
+
+export interface Props {
+  html: string;
+  meta?: {
+    title?: string | null;
+    contentHeading?: string | null;
+  };
+}
+
+const { html, meta } = Astro.props;
+
+const heading = (meta?.contentHeading ?? "").trim() || (meta?.title ?? "").trim();
+const safeHtml = sanitizeHtml(html ?? "");
+---
+<article class="prose prose-sm sm:prose lg:prose-lg mx-auto max-w-3xl">
+  {heading && (
+    <h1 class="mb-6 text-3xl font-bold tracking-tight sm:text-4xl">{heading}</h1>
+  )}
+  {safeHtml && <div set:html={safeHtml} />}
+  {!safeHtml && !heading && (
+    <p class="text-sm text-zinc-500">This page has no content yet.</p>
+  )}
+</article>

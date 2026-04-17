@@ -1,0 +1,54 @@
+---
+/**
+ * Zero-JS SSR placeholder for ZoomableGallery.
+ *
+ * Renders a single main image (no thumbnails, no zoom) so the first paint has
+ * the correct aspect ratio box. The React island swaps in `client:visible`;
+ * until then this avoids layout shift (CLS) and covers LCP.
+ *
+ * Intentionally tiny — thumbnails, hover zoom and lightbox live in the island.
+ */
+type GalleryImage = {
+  url: string;
+  label: string | null;
+};
+
+export interface Props {
+  images: GalleryImage[];
+  productName: string;
+}
+
+const { images, productName } = Astro.props;
+const first = images[0];
+---
+
+{!first && (
+  <div class="flex aspect-square items-center justify-center rounded-2xl bg-zinc-100 text-zinc-400">
+    No image
+  </div>
+)}
+
+{first && (
+  <div class="gallery-placeholder">
+    <div class="relative aspect-square overflow-hidden rounded-2xl bg-zinc-100">
+      <img
+        src={first.url}
+        alt={first.label ?? productName}
+        width="800"
+        height="800"
+        loading="eager"
+        fetchpriority="high"
+        decoding="async"
+        class="h-full w-full object-cover"
+      />
+    </div>
+
+    {images.length > 1 && (
+      <ul class="mt-4 grid grid-cols-5 gap-3" aria-hidden="true">
+        {images.slice(0, 5).map(() => (
+          <li class="aspect-square rounded-lg bg-zinc-100" />
+        ))}
+      </ul>
+    )}
+  </div>
+)}

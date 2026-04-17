@@ -1,0 +1,83 @@
+---
+/**
+ * Horizontal progress indicator for the checkout flow. Render above each
+ * checkout page body.
+ *
+ *   Cart  ›  Shipping  ›  Payment  ›  Complete
+ *
+ * The active step is bolded and coloured with `--color-brand`. Finished
+ * steps are shown in zinc-900; pending steps dim to zinc-400.
+ */
+type Step = "cart" | "shipping" | "payment" | "complete";
+
+type Props = {
+  step: Step;
+};
+
+const { step } = Astro.props as Props;
+
+const ORDER: readonly Step[] = ["cart", "shipping", "payment", "complete"] as const;
+
+const LABELS: Record<Step, string> = {
+  cart: "Cart",
+  shipping: "Shipping",
+  payment: "Payment",
+  complete: "Complete",
+};
+
+const LINKS: Partial<Record<Step, string>> = {
+  cart: "/checkout/cart",
+  shipping: "/checkout/shipping",
+  payment: "/checkout/payment",
+};
+
+const currentIdx = ORDER.indexOf(step);
+
+function status(i: number): "done" | "current" | "pending" {
+  if (i < currentIdx) return "done";
+  if (i === currentIdx) return "current";
+  return "pending";
+}
+---
+<nav class="mb-8" aria-label="Checkout progress">
+  <ol class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+    {ORDER.map((s, i) => {
+      const st = status(i);
+      const isLink = st === "done" && LINKS[s];
+      const commonClass = [
+        "inline-flex items-center gap-2 font-medium",
+        st === "current" && "text-[var(--color-brand)] font-semibold",
+        st === "done" && "text-zinc-900 hover:text-[var(--color-brand)]",
+        st === "pending" && "text-zinc-400",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      const badgeClass = [
+        "flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold",
+        st === "current" && "bg-[var(--color-brand)] text-white",
+        st === "done" && "bg-zinc-900 text-white",
+        st === "pending" && "bg-zinc-200 text-zinc-500",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return (
+        <li class="flex items-center gap-2">
+          {isLink ? (
+            <a href={LINKS[s]} class={commonClass} aria-current={st === "current" ? "step" : undefined}>
+              <span class={badgeClass} aria-hidden="true">{i + 1}</span>
+              <span>{LABELS[s]}</span>
+            </a>
+          ) : (
+            <span class={commonClass} aria-current={st === "current" ? "step" : undefined}>
+              <span class={badgeClass} aria-hidden="true">{i + 1}</span>
+              <span>{LABELS[s]}</span>
+            </span>
+          )}
+          {i < ORDER.length - 1 && (
+            <span class="mx-1 text-zinc-300" aria-hidden="true">›</span>
+          )}
+        </li>
+      );
+    })}
+  </ol>
+</nav>

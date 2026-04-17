@@ -1,0 +1,26 @@
+---
+/**
+ * SkipLink — keyboard shortcut to bypass navigation.
+ *
+ * Renders an anchor targeting `#main` that is visually hidden until it
+ * receives keyboard focus, at which point it snaps to the top-left of the
+ * viewport with high contrast. This MUST be the first focusable element on
+ * the page, so mount it before any navigation.
+ *
+ * Integration (coordinator):
+ *   // Base.astro integration (inside <body> as the very first element):
+ *   //   import SkipLink from "~/components/a11y/SkipLink.astro";
+ *   //   <SkipLink />
+ *   //
+ *   //   And ensure the <main> tag has id="main":
+ *   //   <main id="main" ...>
+ *
+ * a11y-only — no visible UI decorations.
+ */
+---
+<a
+  href="#main"
+  class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[9999] focus:rounded-md focus:bg-zinc-900 focus:px-4 focus:py-3 focus:text-base focus:font-semibold focus:text-white focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-zinc-900"
+>
+  Skip to main content
+</a>

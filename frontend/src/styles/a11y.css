@@ -1,0 +1,48 @@
+/*
+ * a11y.css — global accessibility primitives.
+ *
+ * Integration (coordinator):
+ *   // global.css integration:
+ *   //   @import "./a11y.css";
+ *
+ * Provides:
+ *   - `.focus-within-ring` helper to ring a wrapper when any descendant has focus.
+ *   - High-contrast `:focus-visible` defaults for all interactive elements.
+ *   - `prefers-reduced-motion` honoured globally.
+ *
+ * Note: Tailwind v4 already ships `.sr-only`, so we do not redeclare it.
+ */
+
+@reference "tailwindcss";
+
+/* Helper: ring the container when any descendant receives focus. */
+.focus-within-ring {
+  @apply outline-none focus-within:ring-2 focus-within:ring-[var(--color-brand)] focus-within:ring-offset-2;
+}
+
+/*
+ * Default keyboard focus indicator for interactive elements. `:where()` keeps
+ * specificity at 0 so component-level styles can always override.
+ */
+:where(a, button, input, select, textarea, [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Remove the legacy focus ring when a non-keyboard interaction focuses an element. */
+:where(a, button, input, select, textarea):focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Respect users who prefer reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

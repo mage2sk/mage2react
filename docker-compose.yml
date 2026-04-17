@@ -1,0 +1,92 @@
+# Mage2React Magento 2 + Astro headless docker-compose
+# Traefik: https://${PROJECT_DOMAIN}/{graphql,rest,admin,media,static,pub,errors,customer,setup} -> nginx
+# Traefik: https://${PROJECT_DOMAIN}/*  (everything else)  -> frontend (Astro)
+
+x-traefik-common: &traefik-common
+  traefik.enable: "true"
+  traefik.docker.network: "dev_network"
+
+services:
+
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: ${PROJECT_NAME}_nginx
+    restart: unless-stopped
+    volumes:
+      - ./src:/var/www/html
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      dev_network:
+        aliases:
+          - ${PROJECT_DOMAIN}
+      project_network:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=dev_network"
+      - "traefik.http.routers.${PROJECT_NAME}_api.rule=Host(`${PROJECT_DOMAIN}`) && PathPrefix(`/graphql`,`/rest`,`/admin`,`/media`,`/static`,`/pub`,`/errors`,`/customer/section`,`/setup`,`/downloadable`,`/newsletter/subscriber`,`/catalogsearch/result`,`/review/product`)"
+      - "traefik.http.routers.${PROJECT_NAME}_api.entrypoints=websecure"
+      - "traefik.http.routers.${PROJECT_NAME}_api.tls=true"
+      - "traefik.http.routers.${PROJECT_NAME}_api.priority=100"
+      - "traefik.http.routers.${PROJECT_NAME}_api.service=${PROJECT_NAME}_api"
+      - "traefik.http.services.${PROJECT_NAME}_api.loadbalancer.server.port=80"
+    depends_on:
+      - php-fpm
+
+  php-fpm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PHP_VERSION: ${PHP_VERSION:-8.3}
+    image: ${PROJECT_NAME}_php:${PHP_VERSION:-8.3}
+    container_name: ${PROJECT_NAME}_php
+    restart: unless-stopped
+    volumes:
+      - ./src:/var/www/html
+      - ~/.composer:/var/www/.composer
+    environment:
+      - COMPOSER_MEMORY_LIMIT=-1
+      - COMPOSER_CACHE_DIR=/tmp/composer-cache
+    networks:
+      - dev_network
+      - project_network
+
+  frontend:
+    build:
+      context: ./frontend
+      target: dev
+    image: ${PROJECT_NAME}_frontend:dev
+    container_name: ${PROJECT_NAME}_frontend
+    restart: unless-stopped
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - HOST=0.0.0.0
+      - PORT=${FRONTEND_PORT:-4321}
+      - MAGENTO_GRAPHQL_URL=http://${PROJECT_DOMAIN}/graphql
+      - MAGENTO_INTERNAL_HOST=${PROJECT_DOMAIN}
+      - PUBLIC_SITE_URL=https://${PROJECT_DOMAIN}
+      - PUBLIC_MEDIA_URL=https://${PROJECT_DOMAIN}/media
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=dev_network"
+      - "traefik.http.routers.${PROJECT_NAME}_web.rule=Host(`${PROJECT_DOMAIN}`)"
+      - "traefik.http.routers.${PROJECT_NAME}_web.entrypoints=websecure"
+      - "traefik.http.routers.${PROJECT_NAME}_web.tls=true"
+      - "traefik.http.routers.${PROJECT_NAME}_web.priority=1"
+      - "traefik.http.routers.${PROJECT_NAME}_web.service=${PROJECT_NAME}_web"
+      - "traefik.http.services.${PROJECT_NAME}_web.loadbalancer.server.port=${FRONTEND_PORT:-4321}"
+    depends_on:
+      - nginx
+    networks:
+      - dev_network
+      - project_network
+
+networks:
+  dev_network:
+    external: true
+  project_network:
+    name: ${PROJECT_NAME}_network
+    driver: bridge

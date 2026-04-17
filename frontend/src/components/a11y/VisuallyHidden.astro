@@ -1,0 +1,17 @@
+---
+/**
+ * VisuallyHidden — screen-reader-only text.
+ *
+ * Renders its children inside a `<span class="sr-only">` so assistive
+ * technology announces the content while sighted users see nothing.
+ *
+ * Usage:
+ *   <button>
+ *     <svg aria-hidden="true">…</svg>
+ *     <VisuallyHidden>Close</VisuallyHidden>
+ *   </button>
+ *
+ * Relies on Tailwind's built-in `.sr-only` utility.
+ */
+---
+<span class="sr-only"><slot /></span>

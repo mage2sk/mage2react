@@ -1,0 +1,188 @@
+---
+/**
+ * <Toolbar/> — sort / per-page / view-mode header that sits above the grid.
+ *
+ * Layout (mobile-first):
+ *   [left]  "Items 1-12 of 234"
+ *   [right] [Sort select] [Per-page select] [grid/list toggle]
+ *
+ * The <select> elements navigate on change — a 1.5 KB React island does the
+ * wiring via <ToolbarSelects/>, so zero JS touches the page if the user never
+ * interacts with the selects.
+ *
+ * View mode toggle is visible but only wires the grid view for now (per spec).
+ */
+
+import type {
+  PageInfoT,
+  SortFieldsT,
+  SortKey,
+} from "~/lib/queries-catalog";
+import { ALLOWED_PAGE_SIZES, isSortKey } from "~/lib/queries-catalog";
+import { setParam, buildHref } from "~/lib/url-filters";
+import ToolbarSelects from "./ToolbarSelects.tsx";
+
+export interface Props {
+  totalCount: number;
+  pageInfo: PageInfoT;
+  sortFields: SortFieldsT | null;
+  activeSort: SortKey | null;
+  pageSize: number;
+  basePath: string;
+  activeFilters: URLSearchParams;
+}
+
+const {
+  totalCount,
+  pageInfo,
+  sortFields,
+  activeSort,
+  pageSize,
+  basePath,
+  activeFilters,
+} = Astro.props;
+
+// Item-range summary: "Items 25-36 of 234"
+const first = totalCount === 0 ? 0 : (pageInfo.current_page - 1) * pageInfo.page_size + 1;
+const last = Math.min(pageInfo.current_page * pageInfo.page_size, totalCount);
+
+// Sort options — intersect our whitelist with what Magento says is available.
+// Magento's sort_fields.options values align with attribute codes (`price`,
+// `name`, `position`, `relevance`). Our keys include direction, so we build
+// the visible list manually but gate it on availability.
+const magentoSortCodes = new Set(
+  (sortFields?.options ?? []).map((o) => o.value),
+);
+
+function sortLabelFromMagento(code: string): string | null {
+  const match = sortFields?.options.find((o) => o.value === code);
+  return match?.label ?? null;
+}
+
+interface SortChoice { key: SortKey; label: string; }
+
+const SORT_CHOICES: SortChoice[] = [
+  // `position` = default merchandising order
+  { key: "position_asc", label: sortLabelFromMagento("position") ?? "Position" },
+  // `relevance` only meaningful on search pages; we keep it if Magento lists it
+  ...(magentoSortCodes.has("relevance")
+    ? [{ key: "relevance" as SortKey, label: sortLabelFromMagento("relevance") ?? "Relevance" }]
+    : []),
+  { key: "name_asc", label: `${sortLabelFromMagento("name") ?? "Product Name"}: A → Z` },
+  { key: "name_desc", label: `${sortLabelFromMagento("name") ?? "Product Name"}: Z → A` },
+  { key: "price_asc", label: `${sortLabelFromMagento("price") ?? "Price"}: Low → High` },
+  { key: "price_desc", label: `${sortLabelFromMagento("price") ?? "Price"}: High → Low` },
+].filter((c) => {
+  // Always keep position + name; gate price/relevance on Magento's reported list.
+  if (c.key === "price_asc" || c.key === "price_desc") return magentoSortCodes.has("price") || magentoSortCodes.size === 0;
+  return true;
+});
+
+const activeKey: SortKey = isSortKey(activeSort) ? activeSort : "position_asc";
+
+function sortHref(key: SortKey): string {
+  const next = setParam(activeFilters, "sort", key === "position_asc" ? "" : key);
+  // Reset page when sort changes.
+  next.delete("page");
+  next.delete("p");
+  return buildHref(basePath, next);
+}
+
+function pageSizeHref(ps: number): string {
+  const next = setParam(activeFilters, "pageSize", String(ps));
+  next.delete("page");
+  next.delete("p");
+  return buildHref(basePath, next);
+}
+
+// Stable IDs so the React island can find the selects.
+const sortId = `cat-sort-${Math.random().toString(36).slice(2, 9)}`;
+const pageSizeId = `cat-psize-${Math.random().toString(36).slice(2, 9)}`;
+
+// View toggle: grid-only for now. The list button is rendered disabled with a
+// title tooltip to signal future support.
+---
+<div class="flex flex-col gap-3 border-y border-zinc-200 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+  <p class="text-zinc-600">
+    {totalCount === 0 ? (
+      <span>No items</span>
+    ) : (
+      <span>
+        Items <strong class="text-zinc-900">{first}-{last}</strong> of{" "}
+        <strong class="text-zinc-900">{totalCount}</strong>
+      </span>
+    )}
+  </p>
+
+  <div class="flex flex-wrap items-center gap-3">
+    <label class="flex items-center gap-2">
+      <span class="font-medium text-zinc-700">Sort By</span>
+      <select
+        id={sortId}
+        class="rounded-md border border-zinc-300 bg-white px-2 py-1.5 pr-7 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
+      >
+        {SORT_CHOICES.map((c) => (
+          <option
+            value={c.key}
+            selected={c.key === activeKey}
+            data-href={sortHref(c.key)}
+          >
+            {c.label}
+          </option>
+        ))}
+      </select>
+    </label>
+
+    <label class="flex items-center gap-2">
+      <span class="font-medium text-zinc-700">Show</span>
+      <select
+        id={pageSizeId}
+        class="rounded-md border border-zinc-300 bg-white px-2 py-1.5 pr-7 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
+      >
+        {ALLOWED_PAGE_SIZES.map((ps) => (
+          <option
+            value={ps}
+            selected={ps === pageSize}
+            data-href={pageSizeHref(ps)}
+          >
+            {ps}
+          </option>
+        ))}
+      </select>
+      <span class="text-zinc-500">per page</span>
+    </label>
+
+    <div class="flex items-center gap-1" role="group" aria-label="View mode">
+      <button
+        type="button"
+        class="inline-flex h-8 w-8 items-center justify-center rounded border border-zinc-900 bg-zinc-900 text-white"
+        aria-pressed="true"
+        aria-label="Grid view"
+        disabled
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <rect x="0" y="0" width="7" height="7" rx="1"/>
+          <rect x="9" y="0" width="7" height="7" rx="1"/>
+          <rect x="0" y="9" width="7" height="7" rx="1"/>
+          <rect x="9" y="9" width="7" height="7" rx="1"/>
+        </svg>
+      </button>
+      <button
+        type="button"
+        class="inline-flex h-8 w-8 cursor-not-allowed items-center justify-center rounded border border-zinc-200 bg-white text-zinc-300"
+        aria-pressed="false"
+        aria-label="List view (coming soon)"
+        disabled
+        title="List view coming soon"
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <rect x="0" y="1" width="16" height="3" rx="1"/>
+          <rect x="0" y="7" width="16" height="3" rx="1"/>
+          <rect x="0" y="13" width="16" height="3" rx="1"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<ToolbarSelects client:idle sortId={sortId} pageSizeId={pageSizeId} />

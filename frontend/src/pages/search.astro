@@ -1,0 +1,119 @@
+---
+/**
+ * /search — keyword search results page.
+ *
+ * Reads `?q=foo` plus the standard filter/sort/pagination params. Returns
+ * noindex,follow so search pages don't clog the index.
+ */
+
+import Layout from "~/layouts/Base.astro";
+import SearchResults from "~/components/catalog/SearchResults.astro";
+import {
+  searchProducts,
+  buildFilterInput,
+  isSortKey,
+  normalizePage,
+  normalizePageSize,
+  type SortKey,
+} from "~/lib/queries-catalog";
+import { graphLd, searchResultsPageLd } from "~/lib/jsonld";
+
+export const prerender = false;
+
+const SITE_URL = import.meta.env.PUBLIC_SITE_URL || "http://localhost:4321";
+
+const BASE_PATH = "/search";
+const rawQ = Astro.url.searchParams.get("q") ?? "";
+const query = rawQ.trim().slice(0, 200);
+
+const searchParams = Astro.url.searchParams;
+
+const page = normalizePage(searchParams.get("page") ?? searchParams.get("p"));
+const pageSize = normalizePageSize(
+  searchParams.get("pageSize") ?? searchParams.get("ps"),
+);
+const rawSort = searchParams.get("sort");
+const activeSort: SortKey | null = isSortKey(rawSort) ? rawSort : null;
+const filters = buildFilterInput(searchParams);
+
+// Only hit Magento when the user actually searched for something.
+const result = query
+  ? await searchProducts({
+      search: query,
+      filters,
+      sort: activeSort,
+      page,
+      pageSize,
+    }).catch(() => null)
+  : null;
+
+const title = query ? `Search results for '${query}'` : "Search";
+const description = query
+  ? `Results for '${query}' on mage2react.`
+  : "Search the mage2react catalog.";
+
+// Canonical for /search is always the query-less URL — sort/page/filter
+// variants all collapse back to /search. noindex,follow already set below
+// so these variants never enter the index anyway, but keep the canonical
+// clean for the rare case a search URL leaks.
+const canonicalUrl = query
+  ? new URL(`${BASE_PATH}?q=${encodeURIComponent(query)}`, SITE_URL).toString()
+  : new URL(BASE_PATH, SITE_URL).toString();
+
+const totalResults = result?.total_count ?? 0;
+
+// SearchResultsPage schema.org — helps Google understand this surface
+// even though we noindex it.
+const jsonLd = query
+  ? graphLd([searchResultsPageLd(query, totalResults, canonicalUrl)])
+  : undefined;
+---
+<Layout
+  title={title}
+  description={description}
+  canonical={canonicalUrl}
+  jsonLd={jsonLd}
+  robots="noindex, follow"
+  noindex>
+  {query === "" ? (
+    <section class="mx-auto max-w-xl py-16 text-center">
+      <h1 class="text-3xl font-bold tracking-tight">Search</h1>
+      <p class="mt-2 text-sm text-zinc-500">What are you looking for?</p>
+      <form action={BASE_PATH} method="get" class="mt-6 flex items-center gap-2">
+        <label class="sr-only" for="search-main">Search terms</label>
+        <input
+          id="search-main"
+          name="q"
+          type="search"
+          required
+          minlength="1"
+          maxlength="200"
+          placeholder="e.g. jacket, yoga, duffle"
+          class="flex-1 rounded-md border border-zinc-300 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
+          autofocus
+        />
+        <button
+          type="submit"
+          class="rounded-md border border-zinc-900 bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800"
+        >
+          Search
+        </button>
+      </form>
+    </section>
+  ) : result ? (
+    <SearchResults
+      query={query}
+      result={result}
+      searchParams={searchParams}
+      basePath={BASE_PATH}
+      activeSort={activeSort}
+      pageSize={pageSize}
+      currentPage={result.page_info.current_page}
+    />
+  ) : (
+    <section class="py-16 text-center">
+      <h1 class="text-2xl font-bold">Search is temporarily unavailable</h1>
+      <p class="mt-2 text-sm text-zinc-500">Please try again in a moment.</p>
+    </section>
+  )}
+</Layout>

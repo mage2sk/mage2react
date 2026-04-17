@@ -1,0 +1,25 @@
+---
+// Home integration for CMS blocks (src/pages/index.astro):
+//   import CmsBlockSlot from "~/components/cms/CmsBlockSlot.astro";
+//   <CmsBlockSlot identifier="home-main-block" />
+//
+// Fetches a single Magento CMS block by identifier (using the shared
+// `getCmsBlocks` helper) and renders its sanitized content. If the block is
+// missing, empty, or the GraphQL call failed, the component renders nothing —
+// callers can drop `<CmsBlockSlot />` into any layout without guarding.
+import { getCmsBlocks } from "~/lib/queries";
+import { sanitizeHtml } from "~/lib/sanitize";
+
+export interface Props {
+  identifier: string;
+}
+
+const { identifier } = Astro.props;
+
+const blocks = await getCmsBlocks([identifier]);
+const block = blocks[identifier];
+const safeHtml = block?.content ? sanitizeHtml(block.content) : "";
+---
+{safeHtml && (
+  <div class="cms-block" data-cms-block={identifier} set:html={safeHtml} />
+)}

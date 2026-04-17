@@ -1,0 +1,70 @@
+---
+import Layout from "~/layouts/Base.astro";
+import CartPageItems from "~/components/cart/CartPageItems.tsx";
+import CartSummary from "~/components/cart/CartSummary.tsx";
+import {
+  CART_COOKIE_NAME,
+  getCart,
+  type CartT,
+} from "~/lib/queries-cart";
+
+/**
+ * /checkout/cart — Luma-style full cart page.
+ *
+ * Server-renders the initial cart from the `m2r_cart_id` cookie so users see
+ * their items on first paint even on a cold SSR hit. Interactive pieces
+ * (quantity update, remove, coupon apply) are React islands hydrated
+ * `client:visible`.
+ *
+ * Astro's default server adapter matches `/checkout/cart` exactly; the Luma
+ * URL is `/checkout/cart/` (trailing slash). Astro's server adapter should
+ * respond to both since the node adapter strips trailing slashes by default.
+ */
+export const prerender = false;
+
+const cartId = Astro.cookies.get(CART_COOKIE_NAME)?.value ?? null;
+
+let cartData: CartT | null = null;
+let fetchFailed = false;
+if (cartId) {
+  try {
+    cartData = await getCart(cartId);
+  } catch {
+    fetchFailed = true;
+  }
+}
+
+const isEmpty = !cartData || cartData.total_quantity === 0;
+---
+
+<Layout title="Shopping Cart" description="Your shopping cart.">
+  <h1 class="mb-6 text-3xl font-bold tracking-tight">Shopping Cart</h1>
+
+  {fetchFailed && (
+    <p class="mb-6 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+      We couldn't reach the server. Your cart may load shortly.
+    </p>
+  )}
+
+  {isEmpty ? (
+    <div class="rounded-lg border border-dashed border-zinc-300 p-16 text-center">
+      <h2 class="text-2xl font-semibold text-zinc-800">You have no items in your cart</h2>
+      <p class="mt-2 text-sm text-zinc-500">Browse our catalog and start adding products.</p>
+      <a
+        href="/"
+        class="mt-6 inline-flex items-center justify-center rounded-full bg-[var(--color-brand)] px-6 py-3 text-sm font-semibold text-white hover:bg-[var(--color-brand-dark)]"
+      >
+        Shop our products
+      </a>
+    </div>
+  ) : (
+    <div class="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_340px]">
+      <section>
+        <CartPageItems client:visible initialCart={cartData} />
+      </section>
+      <div>
+        <CartSummary client:visible initialCart={cartData} />
+      </div>
+    </div>
+  )}
+</Layout>

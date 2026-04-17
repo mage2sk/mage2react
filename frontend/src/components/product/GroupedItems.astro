@@ -1,0 +1,30 @@
+---
+import GroupedAddToCart from "./GroupedAddToCart.tsx";
+import type { GroupedItemT } from "~/lib/queries";
+
+export interface Props {
+  items: GroupedItemT[];
+}
+
+const { items } = Astro.props;
+
+// Flatten to the row shape the React island expects. Associated product data
+// gets captured at SSR time so the island's initial state is deterministic.
+const rows = items
+  .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+  .map((g) => {
+    const p = g.product;
+    const final = p.price_range.minimum_price.final_price;
+    return {
+      sku: p.sku,
+      name: p.name,
+      price: final.value ?? 0,
+      currency: final.currency ?? "USD",
+      image: p.image?.url ?? null,
+      initialQty: Math.max(0, g.qty ?? 0),
+      inStock: (p.stock_status ?? "IN_STOCK") === "IN_STOCK",
+    };
+  });
+---
+
+<GroupedAddToCart rows={rows} client:visible />

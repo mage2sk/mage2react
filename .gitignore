@@ -1,0 +1,44 @@
+# Secrets + local env
+.env
+.env.local
+.env.*.local
+
+# Magento 2 source tree — too large for version control.
+# Keep ONLY our custom module.
+src/*
+!src/app
+src/app/*
+!src/app/code
+src/app/code/*
+!src/app/code/Panth
+
+# Frontend build + deps
+frontend/node_modules
+frontend/.astro
+frontend/dist
+frontend/.pnpm-store
+frontend/pnpm-lock.yaml
+
+# Runtime + generated Magento files (defensive — they're under src/ which is
+# already ignored, but listed for clarity).
+**/var/
+**/generated/
+**/pub/media/
+**/pub/static/
+
+# Editor / OS
+.DS_Store
+.vscode
+.idea
+*.swp
+*.log
+
+# Docker volumes
+*.db
+
+# Node
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*

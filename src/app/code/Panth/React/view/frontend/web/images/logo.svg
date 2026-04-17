@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 48" width="200" height="48">
+  <defs>
+    <linearGradient id="m2rGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b5fff"/>
+      <stop offset="100%" stop-color="#5a8aff"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(6, 6)">
+    <rect width="36" height="36" rx="9" fill="url(#m2rGrad)"/>
+    <text x="18" y="25" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="16" font-weight="800" fill="#fff" letter-spacing="-0.5">m2r</text>
+  </g>
+  <text x="52" y="32" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="20" font-weight="800" letter-spacing="-0.5" fill="#0b5fff">mage2<tspan fill="#111">react</tspan></text>
+</svg>

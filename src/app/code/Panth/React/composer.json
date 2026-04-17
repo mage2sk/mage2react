@@ -1,0 +1,22 @@
+{
+    "name": "panth/module-react",
+    "description": "Panth_React: CORS headers and configuration for the Astro/React headless storefront consuming Magento GraphQL.",
+    "type": "magento2-module",
+    "license": "proprietary",
+    "version": "1.0.0",
+    "require": {
+        "php": "~8.3.0",
+        "magento/framework": "*",
+        "magento/module-store": "*",
+        "magento/module-config": "*",
+        "magento/module-graph-ql": "*"
+    },
+    "autoload": {
+        "files": [
+            "registration.php"
+        ],
+        "psr-4": {
+            "Panth\\React\\": ""
+        }
+    }
+}

@@ -1,0 +1,33 @@
+---
+import Layout from "~/layouts/Base.astro";
+---
+<Layout
+  title="You're offline"
+  description="This page is unavailable while you're offline."
+  noindex={true}
+>
+  <div class="flex flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-300 px-6 py-24 text-center">
+    <p class="text-sm font-semibold uppercase tracking-widest text-zinc-500">Offline</p>
+    <h1 class="mt-3 text-4xl font-bold tracking-tight sm:text-5xl">You're offline</h1>
+    <p class="mt-4 max-w-md text-zinc-600">
+      We couldn't reach the network. Check your connection and try again — any
+      pages you've already visited should still work.
+    </p>
+
+    {/* Pure-HTML retry: reloads the current URL without requiring JS. */}
+    <form method="get" action="" class="mt-8">
+      <button
+        type="submit"
+        class="inline-flex items-center rounded-full bg-[color:var(--color-brand,#0b5fff)] px-6 py-3 text-sm font-medium text-white hover:opacity-90"
+      >
+        Retry
+      </button>
+    </form>
+
+    <noscript>
+      <p class="mt-4 text-xs text-zinc-500">
+        Press the browser refresh button if the retry fails.
+      </p>
+    </noscript>
+  </div>
+</Layout>

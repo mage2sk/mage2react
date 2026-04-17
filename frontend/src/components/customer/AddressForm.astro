@@ -1,0 +1,279 @@
+---
+import FormField from "./FormField.astro";
+import type { CountryT, CustomerAddressT } from "~/lib/queries-customer";
+
+type Props = {
+  countries: CountryT[];
+  address?: CustomerAddressT | null;
+  values?: Record<string, string>;
+  errors?: Record<string, string>;
+  defaultCountryCode?: string;
+  mode: "new" | "edit";
+};
+
+const {
+  countries,
+  address = null,
+  values = {},
+  errors = {},
+  defaultCountryCode = "US",
+  mode,
+} = Astro.props as Props;
+
+function val(field: string, fallback: string = ""): string {
+  if (values[field] != null) return values[field];
+  return fallback;
+}
+
+const existingStreet = address?.street ?? [];
+
+const initial = {
+  firstname: val("firstname", address?.firstname ?? ""),
+  lastname: val("lastname", address?.lastname ?? ""),
+  company: val("company", address?.company ?? ""),
+  telephone: val("telephone", address?.telephone ?? ""),
+  street0: val("street0", existingStreet[0] ?? ""),
+  street1: val("street1", existingStreet[1] ?? ""),
+  city: val("city", address?.city ?? ""),
+  country_code: val("country_code", address?.country_code ?? defaultCountryCode),
+  region_id: val("region_id", address?.region?.region_id ? String(address.region.region_id) : ""),
+  region: val("region", address?.region?.region ?? ""),
+  postcode: val("postcode", address?.postcode ?? ""),
+  default_shipping: val("default_shipping", address?.default_shipping ? "1" : ""),
+  default_billing: val("default_billing", address?.default_billing ? "1" : ""),
+};
+
+// Pre-sort the regions-per-country map for the client dropdown.
+const regionsByCountry: Record<string, { id: number | null; code: string | null; name: string | null }[]> = {};
+for (const c of countries) {
+  if (!c.id) continue;
+  regionsByCountry[c.id] = (c.available_regions ?? []).map((r) => ({
+    id: r.id ?? null,
+    code: r.code ?? null,
+    name: r.name ?? null,
+  }));
+}
+const regionsJson = JSON.stringify(regionsByCountry);
+const initialRegionId = initial.region_id;
+---
+<form method="post" class="flex flex-col gap-6" novalidate>
+  <section class="rounded-xl border border-zinc-200 bg-white p-6">
+    <h2 class="mb-4 text-lg font-semibold">Contact Information</h2>
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <FormField
+        id="addr-firstname"
+        name="firstname"
+        label="First Name"
+        value={initial.firstname}
+        required
+        autocomplete="given-name"
+        error={errors.firstname ?? null}
+      />
+      <FormField
+        id="addr-lastname"
+        name="lastname"
+        label="Last Name"
+        value={initial.lastname}
+        required
+        autocomplete="family-name"
+        error={errors.lastname ?? null}
+      />
+      <FormField
+        id="addr-company"
+        name="company"
+        label="Company"
+        value={initial.company}
+        autocomplete="organization"
+        error={errors.company ?? null}
+      />
+      <FormField
+        id="addr-telephone"
+        name="telephone"
+        label="Phone Number"
+        type="tel"
+        value={initial.telephone}
+        required
+        autocomplete="tel"
+        error={errors.telephone ?? null}
+      />
+    </div>
+  </section>
+
+  <section class="rounded-xl border border-zinc-200 bg-white p-6">
+    <h2 class="mb-4 text-lg font-semibold">Address</h2>
+    <div class="grid grid-cols-1 gap-4">
+      <FormField
+        id="addr-street0"
+        name="street0"
+        label="Street Address"
+        value={initial.street0}
+        required
+        autocomplete="address-line1"
+        error={errors.street0 ?? null}
+      />
+      <FormField
+        id="addr-street1"
+        name="street1"
+        label="Street Address Line 2"
+        value={initial.street1}
+        autocomplete="address-line2"
+        error={errors.street1 ?? null}
+      />
+      <FormField
+        id="addr-city"
+        name="city"
+        label="City"
+        value={initial.city}
+        required
+        autocomplete="address-level2"
+        error={errors.city ?? null}
+      />
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div class="flex flex-col gap-1">
+          <label for="addr-country_code" class="text-sm font-medium text-zinc-800">
+            Country <span class="text-red-600" aria-hidden="true">*</span>
+          </label>
+          <select
+            id="addr-country_code"
+            name="country_code"
+            required
+            autocomplete="country"
+            aria-invalid={errors.country_code ? "true" : undefined}
+            class={[
+              "block w-full rounded-md border bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-zinc-200",
+              errors.country_code ? "border-red-500" : "border-zinc-300 focus:border-zinc-900",
+            ].join(" ")}
+          >
+            {countries.length === 0 && (
+              <option value={initial.country_code}>{initial.country_code}</option>
+            )}
+            {countries.map((c) => (
+              <option value={c.id ?? ""} selected={c.id === initial.country_code}>
+                {c.full_name_english ?? c.id}
+              </option>
+            ))}
+          </select>
+          {errors.country_code && (
+            <p class="text-xs font-medium text-red-600">{errors.country_code}</p>
+          )}
+        </div>
+        <div id="region-wrap" class="flex flex-col gap-1">
+          <label for="addr-region_id" class="text-sm font-medium text-zinc-800">
+            State / Province
+          </label>
+          <select
+            id="addr-region_id"
+            name="region_id"
+            aria-invalid={errors.region_id ? "true" : undefined}
+            class={[
+              "block w-full rounded-md border bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-zinc-200",
+              errors.region_id ? "border-red-500" : "border-zinc-300 focus:border-zinc-900",
+            ].join(" ")}
+          >
+            <option value="">— Please select —</option>
+          </select>
+          <input
+            id="addr-region"
+            name="region"
+            type="text"
+            hidden
+            value={initial.region}
+            autocomplete="address-level1"
+            placeholder="State / Province"
+            class={[
+              "mt-1 block w-full rounded-md border bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-zinc-200",
+              errors.region ? "border-red-500" : "border-zinc-300 focus:border-zinc-900",
+            ].join(" ")}
+          />
+          {errors.region_id && (
+            <p class="text-xs font-medium text-red-600">{errors.region_id}</p>
+          )}
+          {errors.region && (
+            <p class="text-xs font-medium text-red-600">{errors.region}</p>
+          )}
+        </div>
+      </div>
+      <FormField
+        id="addr-postcode"
+        name="postcode"
+        label="Zip/Postal Code"
+        value={initial.postcode}
+        required
+        autocomplete="postal-code"
+        error={errors.postcode ?? null}
+      />
+    </div>
+  </section>
+
+  <section class="rounded-xl border border-zinc-200 bg-white p-6">
+    <h2 class="mb-4 text-lg font-semibold">Defaults</h2>
+    <div class="flex flex-col gap-3">
+      <label class="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          name="default_shipping"
+          value="1"
+          checked={initial.default_shipping === "1"}
+          class="mt-0.5 h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-400"
+        />
+        <span>Use as my default shipping address</span>
+      </label>
+      <label class="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          name="default_billing"
+          value="1"
+          checked={initial.default_billing === "1"}
+          class="mt-0.5 h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-400"
+        />
+        <span>Use as my default billing address</span>
+      </label>
+    </div>
+  </section>
+
+  <div class="flex items-center justify-between">
+    <a href="/customer/address" class="text-sm font-medium text-zinc-600 hover:text-zinc-900">
+      Back
+    </a>
+    <button
+      type="submit"
+      class="inline-flex items-center rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800"
+    >
+      {mode === "new" ? "Save Address" : "Update Address"}
+    </button>
+  </div>
+</form>
+
+<script is:inline define:vars={{ regionsJson, initialRegionId }}>
+  const regions = JSON.parse(regionsJson);
+  const countrySel = document.getElementById("addr-country_code");
+  const regionSel = document.getElementById("addr-region_id");
+  const regionInput = document.getElementById("addr-region");
+  if (countrySel && regionSel && regionInput) {
+    const populate = () => {
+      const code = countrySel.value;
+      const list = regions[code] || [];
+      // Reset
+      regionSel.innerHTML = '<option value="">— Please select —</option>';
+      if (list.length > 0) {
+        regionSel.disabled = false;
+        regionSel.required = true;
+        regionInput.setAttribute("hidden", "");
+        regionInput.value = "";
+        for (const r of list) {
+          const opt = document.createElement("option");
+          opt.value = r.id ? String(r.id) : "";
+          opt.textContent = r.name || r.code || "";
+          if (String(r.id) === String(initialRegionId)) opt.selected = true;
+          regionSel.appendChild(opt);
+        }
+      } else {
+        regionSel.disabled = true;
+        regionSel.required = false;
+        regionInput.removeAttribute("hidden");
+      }
+    };
+    countrySel.addEventListener("change", populate);
+    populate();
+  }
+</script>

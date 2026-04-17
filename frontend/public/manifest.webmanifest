@@ -1,0 +1,16 @@
+{
+  "name": "mage2react",
+  "short_name": "mage2react",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#0b5fff",
+  "background_color": "#ffffff",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ],
+  "categories": ["shopping"],
+  "description": "The fastest Magento storefront."
+}

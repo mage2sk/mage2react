@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:framework:ObjectManager/etc/config.xsd">
+    <!--
+        GraphQL-area DI for Panth_React.
+
+        The CORS plugin is wired in etc/di.xml (global) because it intercepts
+        \Magento\GraphQl\Controller\GraphQl which dispatches requests outside
+        the graphql area context. Keep this file as an area-specific extension
+        point for future GraphQL-only wiring.
+    -->
+    <type name="Panth\React\Plugin\Cors\AddCorsHeaders"/>
+</config>

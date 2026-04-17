@@ -1,0 +1,89 @@
+---
+/**
+ * RatingStars — tiny, reusable, server-rendered star display.
+ *
+ * Accepts either:
+ *   - `value` as a 0–100 percentage (Magento's `rating_summary` /
+ *     `average_rating` convention) — pass `scale={100}` (the default), or
+ *   - `value` as a 0–5 number — pass `scale={5}`.
+ *
+ * Renders exactly 5 stars with partial fill using two overlaid SVGs
+ * (gray background + gold foreground clipped by inline width %). This keeps
+ * the component zero-JS and fully inlinable into Astro templates.
+ */
+type Scale = 100 | 5;
+type Size = "sm" | "md" | "lg";
+
+export interface Props {
+  value: number;
+  scale?: Scale;
+  size?: Size;
+  label?: string;
+}
+
+const { value, scale = 100, size = "md", label } = Astro.props;
+
+// Normalise to a 0–100 percentage regardless of the scale provided.
+const clamp = (n: number, min: number, max: number): number =>
+  Math.max(min, Math.min(max, n));
+
+const pct = scale === 100
+  ? clamp(value, 0, 100)
+  : clamp((value / 5) * 100, 0, 100);
+
+// Display string (e.g. "4.2 / 5") for accessible labels.
+const outOfFive = scale === 100 ? (pct / 20).toFixed(1) : value.toFixed(1);
+
+const sizePx = size === "sm" ? 14 : size === "lg" ? 24 : 18;
+const gapPx = size === "sm" ? 1 : 2;
+
+const ariaLabel = label ?? `Rated ${outOfFive} out of 5`;
+
+// Five-pointed star path (viewBox 0 0 24 24).
+const STAR_D =
+  "M12 2l2.9 6.9 7.1.6-5.4 4.8 1.7 7-6.3-3.8-6.3 3.8 1.7-7L2 9.5l7.1-.6L12 2z";
+---
+
+<span
+  class="inline-flex items-center"
+  role="img"
+  aria-label={ariaLabel}
+  style={`gap:${gapPx}px;`}
+>
+  <span class="rating-stars-wrap relative inline-block" style={`width:${(sizePx + gapPx) * 5 - gapPx}px;height:${sizePx}px;`}>
+    {/* Gray background row */}
+    <span class="absolute inset-0 flex" aria-hidden="true" style={`gap:${gapPx}px;`}>
+      {[0, 1, 2, 3, 4].map(() => (
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width={sizePx}
+          height={sizePx}
+          viewBox="0 0 24 24"
+          class="text-zinc-300 shrink-0"
+          fill="currentColor"
+        >
+          <path d={STAR_D} />
+        </svg>
+      ))}
+    </span>
+    {/* Gold foreground clipped by width % */}
+    <span
+      class="absolute inset-y-0 left-0 overflow-hidden flex"
+      aria-hidden="true"
+      style={`width:${pct}%;gap:${gapPx}px;`}
+    >
+      {[0, 1, 2, 3, 4].map(() => (
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width={sizePx}
+          height={sizePx}
+          viewBox="0 0 24 24"
+          class="text-amber-400 shrink-0"
+          fill="currentColor"
+        >
+          <path d={STAR_D} />
+        </svg>
+      ))}
+    </span>
+  </span>
+</span>

@@ -1,0 +1,136 @@
+---
+/**
+ * <Seo/> — centralised head tag renderer.
+ *
+ * SEO rules satisfied:
+ *   - Title + meta description (basic)
+ *   - Canonical URL (duplicate-content)
+ *   - Robots directive with 2026-safe defaults (max-snippet, max-image-preview:large,
+ *     max-video-preview) — or noindex/nofollow, or caller-supplied override
+ *   - Open Graph + og:image dimensions + og:image:alt + article timestamps
+ *   - Twitter card (summary_large_image) + site/creator handles
+ *   - Pagination hints via <link rel="prev"> / <link rel="next">
+ *   - Multi-locale hreflang via <link rel="alternate">
+ *   - OpenSearch autodiscovery via <link rel="search">
+ *   - Theme color for mobile browsers
+ *   - JSON-LD structured data (one or many blocks; caller may pass an @graph root)
+ *   - Inline <script type="application/ld+json"> bodies are escaped via safeStringify()
+ *     so they cannot terminate the <script> tag early.
+ */
+export interface AlternateLink {
+  hreflang: string;
+  href: string;
+}
+
+export interface Props {
+  title: string;
+  description: string;
+  canonical: string;
+  ogImage?: string;
+  ogImageAlt?: string;
+  ogImageWidth?: number;
+  ogImageHeight?: number;
+  ogType?: "website" | "product" | "article";
+  jsonLd?: unknown | unknown[];
+  noindex?: boolean;
+  robots?: string;
+  twitterSite?: string;
+  twitterCreator?: string;
+  prev?: string;
+  next?: string;
+  alternates?: AlternateLink[];
+  articlePublishedTime?: string;
+  articleModifiedTime?: string;
+}
+
+const {
+  title,
+  description,
+  canonical,
+  ogImage,
+  ogImageAlt,
+  ogImageWidth,
+  ogImageHeight,
+  ogType = "website",
+  jsonLd,
+  noindex = false,
+  robots,
+  twitterSite,
+  twitterCreator,
+  prev,
+  next,
+  alternates,
+  articlePublishedTime,
+  articleModifiedTime,
+} = Astro.props;
+
+const SITE_NAME = "mage2react";
+const LOCALE = "en_US";
+
+const DEFAULT_ROBOTS =
+  "max-snippet:-1, max-image-preview:large, max-video-preview:-1, index, follow";
+const NOINDEX_ROBOTS = "noindex, nofollow";
+
+const robotsContent = robots ?? (noindex ? NOINDEX_ROBOTS : DEFAULT_ROBOTS);
+
+function safeStringify(obj: unknown): string {
+  // Escape </ to <\/ so an inline JSON-LD block cannot terminate the <script> tag early.
+  return JSON.stringify(obj).replace(/<\/(script)/gi, "<\\/$1").replace(/<\//g, "<\\/");
+}
+
+const jsonLdBlocks: unknown[] = jsonLd === undefined
+  ? []
+  : Array.isArray(jsonLd)
+  ? jsonLd.filter((x): x is unknown => x !== null && x !== undefined)
+  : [jsonLd];
+---
+<title>{title}</title>
+<meta name="description" content={description} />
+<link rel="canonical" href={canonical} />
+<meta name="robots" content={robotsContent} />
+
+<meta property="og:title" content={title} />
+<meta property="og:description" content={description} />
+<meta property="og:url" content={canonical} />
+<meta property="og:type" content={ogType} />
+<meta property="og:site_name" content={SITE_NAME} />
+<meta property="og:locale" content={LOCALE} />
+{ogImage && <meta property="og:image" content={ogImage} />}
+{ogImage && ogImageAlt && <meta property="og:image:alt" content={ogImageAlt} />}
+{ogImage && ogImageWidth && <meta property="og:image:width" content={String(ogImageWidth)} />}
+{ogImage && ogImageHeight && <meta property="og:image:height" content={String(ogImageHeight)} />}
+
+{articlePublishedTime && (
+  <meta property="article:published_time" content={articlePublishedTime} />
+)}
+{articleModifiedTime && (
+  <meta property="article:modified_time" content={articleModifiedTime} />
+)}
+
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content={title} />
+<meta name="twitter:description" content={description} />
+{ogImage && <meta name="twitter:image" content={ogImage} />}
+{twitterSite && <meta name="twitter:site" content={twitterSite} />}
+{twitterCreator && <meta name="twitter:creator" content={twitterCreator} />}
+
+{prev && <link rel="prev" href={prev} />}
+{next && <link rel="next" href={next} />}
+
+{alternates && alternates.map((alt) => (
+  <link rel="alternate" hreflang={alt.hreflang} href={alt.href} />
+))}
+
+<link
+  rel="search"
+  type="application/opensearchdescription+xml"
+  href="/opensearch.xml"
+  title={`${SITE_NAME} search`}
+/>
+
+<meta name="theme-color" content="#0b5fff" />
+<meta name="pinterest-rich-pin" content="true" />
+
+{jsonLdBlocks.map((block) => (
+  <script type="application/ld+json" set:html={safeStringify(block)} />
+))}

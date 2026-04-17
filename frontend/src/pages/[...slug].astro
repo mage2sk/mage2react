@@ -1,0 +1,878 @@
+---
+/**
+ * Unified Magento-style catch-all route.
+ *
+ * Magento's native URL scheme:
+ *   /{url_key}.html                  → products
+ *   /{url_path}.html                 → categories (may be nested, e.g. `gear/bags.html`)
+ *   /{identifier}                    → CMS pages (no suffix)
+ *
+ * Strategy:
+ *   1. Normalise the incoming slug.
+ *   2. Ask Magento's `urlResolver` to classify the path. Try with `.html` first
+ *      (products & categories) then without (CMS pages).
+ *   3. Branch on the returned `type`.
+ *   4. If `urlResolver` returns nothing, fall through to the proxy so third-party
+ *      Magento routes keep working (Amasty blog, checkout, customer account, …).
+ *
+ * The former dedicated routes (`/c/...`, `/p/...`, `[...fallback]`) have all
+ * been absorbed into this file.
+ */
+
+import Layout from "~/layouts/Base.astro";
+import ProductCard from "~/components/ProductCard.astro";
+import Breadcrumbs from "~/components/seo/Breadcrumbs.astro";
+import CategoryGrid from "~/components/catalog/CategoryGrid.astro";
+import { renderCategoryPayload, buildCategoryJsonLd } from "~/lib/catalog-helpers";
+import AddToCartButton from "~/components/AddToCartButton.tsx";
+import Gallery from "~/components/product/Gallery.astro";
+import ConfigurableOptions from "~/components/product/ConfigurableOptions.tsx";
+import BundleOptions from "~/components/product/BundleOptions.tsx";
+import GroupedItems from "~/components/product/GroupedItems.astro";
+import DownloadableLinks from "~/components/product/DownloadableLinks.tsx";
+import {
+  resolveUrl,
+  getProductByUrlKey,
+  getCategoryByUid,
+  getProductsByCategoryUid,
+  getCmsPage,
+  type ProductT,
+} from "~/lib/queries";
+import { sanitizeHtml } from "~/lib/sanitize";
+import { formatMoney } from "~/lib/money";
+import {
+  breadcrumbLd,
+  collectionPageLd,
+  graphLd,
+  itemListLd,
+  productLd,
+  webPageLd,
+  type BreadcrumbItem,
+  type ProductCardLike,
+  type ProductLike,
+} from "~/lib/jsonld";
+import { fetchWithTimeout, FetchTimeoutError } from "~/lib/fetch-utils";
+
+export const prerender = false;
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Setup                                                                      */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+const SITE_URL = import.meta.env.PUBLIC_SITE_URL || "http://localhost:4321";
+const INTERNAL_HOST =
+  (import.meta.env.MAGENTO_INTERNAL_HOST as string | undefined) ?? "mage2react.local";
+const PUBLIC_HOST = "mage2react.local";
+
+function stripSlashes(s: string): string {
+  return s.replace(/^\/+/, "").replace(/\/+$/, "");
+}
+
+const rawSlug = Astro.params.slug ?? "";
+const slug = stripSlashes(Array.isArray(rawSlug) ? rawSlug.join("/") : rawSlug);
+
+if (slug === "") {
+  return Astro.redirect("/");
+}
+
+// Magento products/categories always live under a `.html` URL. CMS pages
+// don't. Try both; whichever returns a type wins.
+const slugNoSuffix = slug.endsWith(".html") ? slug.slice(0, -5) : slug;
+const withSuffix = `${slugNoSuffix}.html`;
+
+const resolved = await resolveUrl(withSuffix);
+const finalResolved = resolved.type ? resolved : await resolveUrl(slugNoSuffix);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Helpers shared by branches                                                 */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+function segmentLabel(seg: string): string {
+  return seg
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+// Proxy fallback — embedded here so unknown URLs (e.g. Magento admin modules)
+// still work transparently. Mirrors the behaviour of the retired
+// `[...fallback].astro`.
+async function renderProxy(): Promise<Response | null> {
+  const ALLOWED_METHODS = new Set<string>(["GET", "POST", "HEAD"]);
+  const TIMEOUT_MS = 10_000;
+  const MAX_UPSTREAM_BYTES = 25 * 1024 * 1024;
+
+  const HOP_BY_HOP = new Set<string>([
+    "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+    "te", "trailer", "transfer-encoding", "upgrade",
+  ]);
+  const PASSTHROUGH_RESPONSE_HEADERS = [
+    "content-type", "cache-control", "set-cookie", "location",
+    "last-modified", "etag", "vary", "content-language", "content-disposition",
+  ] as const;
+  const FORWARDED_REQUEST_HEADERS = [
+    "cookie", "user-agent", "accept", "accept-language", "referer",
+  ] as const;
+
+  const method = Astro.request.method.toUpperCase();
+  if (!ALLOWED_METHODS.has(method)) {
+    return new Response("Method Not Allowed", {
+      status: 405,
+      headers: { Allow: "GET, POST, HEAD", "Content-Type": "text/plain" },
+    });
+  }
+
+  const url = Astro.url;
+  const upstreamUrl = `http://${INTERNAL_HOST}${url.pathname}${url.search}`;
+
+  const upstreamHeaders = new Headers();
+  for (const name of FORWARDED_REQUEST_HEADERS) {
+    const value = Astro.request.headers.get(name);
+    if (value !== null) upstreamHeaders.set(name, value);
+  }
+  for (const key of Array.from(upstreamHeaders.keys())) {
+    if (key.toLowerCase().startsWith("x-mage2react-")) upstreamHeaders.delete(key);
+  }
+  upstreamHeaders.set("Host", PUBLIC_HOST);
+  upstreamHeaders.set("X-Forwarded-Host", PUBLIC_HOST);
+  upstreamHeaders.set("X-Forwarded-Proto", "https");
+  try {
+    const clientAddr = Astro.clientAddress;
+    if (clientAddr) upstreamHeaders.set("X-Forwarded-For", clientAddr);
+  } catch { /* some adapters don't expose clientAddress */ }
+
+  let upstreamBody: BodyInit | undefined;
+  if (method === "POST") {
+    const contentType = Astro.request.headers.get("content-type");
+    if (contentType) upstreamHeaders.set("Content-Type", contentType);
+    upstreamBody = await Astro.request.arrayBuffer();
+  }
+
+  let upstream: Response;
+  try {
+    upstream = await fetchWithTimeout(
+      upstreamUrl,
+      { method, headers: upstreamHeaders, body: upstreamBody, redirect: "manual" },
+      TIMEOUT_MS,
+    );
+  } catch (err) {
+    if (err instanceof FetchTimeoutError) {
+      console.warn(`[catch-all-proxy] upstream timeout for ${upstreamUrl}`);
+    } else {
+      console.warn(`[catch-all-proxy] upstream error for ${upstreamUrl}:`, err);
+    }
+    return new Response(
+      `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Not found</title></head><body><h1>404 — Not found</h1></body></html>`,
+      { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } },
+    );
+  }
+
+  const contentLengthRaw = upstream.headers.get("content-length");
+  if (contentLengthRaw !== null) {
+    const contentLength = Number.parseInt(contentLengthRaw, 10);
+    if (Number.isFinite(contentLength) && contentLength > MAX_UPSTREAM_BYTES) {
+      return new Response("Upstream response too large", {
+        status: 502,
+        headers: { "Content-Type": "text/plain" },
+      });
+    }
+  }
+
+  const outHeaders = new Headers();
+  for (const name of PASSTHROUGH_RESPONSE_HEADERS) {
+    if (name === "set-cookie") {
+      const anyHeaders = upstream.headers as Headers & { getSetCookie?: () => string[] };
+      const cookies = anyHeaders.getSetCookie?.() ?? [];
+      for (const c of cookies) outHeaders.append("Set-Cookie", c);
+      continue;
+    }
+    const value = upstream.headers.get(name);
+    if (value !== null) outHeaders.set(name, value);
+  }
+  for (const name of Array.from(outHeaders.keys())) {
+    const lower = name.toLowerCase();
+    if (HOP_BY_HOP.has(lower) || lower.startsWith("proxy-")) outHeaders.delete(name);
+  }
+  outHeaders.set("X-Mage2React-Proxied", "1");
+
+  // Magento's default 404 is the Luma-themed "no-route" CMS page. Rather
+  // than leak that, surface our own React 404 when the upstream 404s.
+  if (upstream.status === 404) {
+    return null;
+  }
+
+  const body = method === "HEAD" ? null : upstream.body;
+  return new Response(body, {
+    status: upstream.status,
+    statusText: upstream.statusText,
+    headers: outHeaders,
+  });
+}
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Branch: no match → proxy fallback                                          */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+if (!finalResolved.type) {
+  const proxied = await renderProxy();
+  if (proxied) return proxied;
+  // Proxy upstream said 404 — fall through to our own 404 render.
+  Astro.response.status = 404;
+}
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Branch: CMS page                                                           */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+let cmsPage: Awaited<ReturnType<typeof getCmsPage>> = null;
+if (finalResolved.type === "CMS_PAGE") {
+  // urlResolver gives us the CMS page identifier on `relative_url`; fall back
+  // to the slug when that's missing.
+  const ident = finalResolved.relativeUrl
+    ? finalResolved.relativeUrl.replace(/^\/+|\/+$/g, "")
+    : slugNoSuffix;
+  cmsPage = await getCmsPage(ident || slugNoSuffix);
+  if (!cmsPage) {
+    // Fall back to raw slug as identifier if relative_url indirection failed.
+    cmsPage = await getCmsPage(slugNoSuffix);
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Branch: CATEGORY                                                           */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+let category: Awaited<ReturnType<typeof getCategoryByUid>> = null;
+let categoryProducts: Awaited<ReturnType<typeof getProductsByCategoryUid>>["products"] | null = null;
+let categoryPage = 1;
+
+if (finalResolved.type === "CATEGORY" && finalResolved.uid) {
+  const pageParam = Astro.url.searchParams.get("page");
+  categoryPage = Math.max(1, Number.parseInt(pageParam ?? "1", 10) || 1);
+  const cat = await getCategoryByUid(finalResolved.uid);
+  category = cat;
+  const descendantUids = (cat?.children ?? [])
+    .map((c) => c.uid)
+    .filter((u): u is string => Boolean(u));
+  const prods = await getProductsByCategoryUid(
+    finalResolved.uid,
+    categoryPage,
+    24,
+    undefined,
+    descendantUids,
+  );
+  categoryProducts = prods.products;
+}
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Branch: PRODUCT                                                            */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+let product: ProductT | null = null;
+if (finalResolved.type === "PRODUCT") {
+  // Take the last `/`-segment of the resolved path (or original slug) as the
+  // url_key. Some installs return paths like `url_key.html`.
+  const relPath = finalResolved.relativeUrl ?? withSuffix;
+  const last = stripSlashes(relPath).split("/").pop() ?? slugNoSuffix;
+  const urlKey = last.replace(/\.html$/, "");
+  product = await getProductByUrlKey(urlKey);
+}
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Precomputed view data (keeps the template readable)                        */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+// Product-branch derivations
+let productView: null | {
+  p: ProductT;
+  mainImage: string | null;
+  mainLabel: string;
+  gallery: Array<{ url: string; label: string | null }>;
+  price: number;
+  currency: string;
+  onSale: boolean;
+  inStock: boolean;
+  shortHtml: string;
+  longHtml: string;
+  shortText: string;
+  canonical: string;
+  crumbs: BreadcrumbItem[];
+  jsonLd: unknown[];
+  ogImage: string | undefined;
+} = null;
+
+if (product) {
+  const mainImage = product.image?.url ?? product.media_gallery?.[0]?.url ?? null;
+  const mainLabel = product.image?.label ?? product.name;
+  const gallery = (product.media_gallery ?? [])
+    .filter((g) => g.url && !g.disabled)
+    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+    .map((g) => ({ url: g.url, label: g.label }));
+  // If no gallery, fall back to image
+  if (gallery.length === 0 && mainImage) {
+    gallery.push({ url: mainImage, label: mainLabel ?? null });
+  }
+
+  const final = product.price_range.minimum_price.final_price;
+  const regular = product.price_range.minimum_price.regular_price;
+  const onSale =
+    final.value != null && regular.value != null && final.value < regular.value;
+  const inStock = (product.stock_status ?? "IN_STOCK") === "IN_STOCK";
+  const price = final.value ?? 0;
+  const currency = final.currency ?? "USD";
+
+  const shortHtml = product.short_description?.html
+    ? sanitizeHtml(product.short_description.html)
+    : "";
+  const longHtml = product.description?.html
+    ? sanitizeHtml(product.description.html)
+    : "";
+  const shortText = product.short_description?.html
+    ? product.short_description.html
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 160)
+    : product.name;
+
+  const suffix = product.url_suffix ?? ".html";
+  const canonical = new URL(
+    `/${product.url_key ?? slugNoSuffix}${suffix}`,
+    SITE_URL,
+  ).toString();
+
+  const crumbs: BreadcrumbItem[] = [
+    { name: "Home", url: new URL("/", SITE_URL).toString() },
+  ];
+  // Best category path: first category's breadcrumbs then its own name.
+  const firstCat = product.categories?.[0];
+  if (firstCat?.breadcrumbs) {
+    for (const b of firstCat.breadcrumbs) {
+      if (!b.category_url_path || !b.category_name) continue;
+      crumbs.push({
+        name: b.category_name,
+        url: new URL(`/${b.category_url_path}.html`, SITE_URL).toString(),
+      });
+    }
+  }
+  if (firstCat?.url_path && firstCat?.name) {
+    crumbs.push({
+      name: firstCat.name,
+      url: new URL(`/${firstCat.url_path}.html`, SITE_URL).toString(),
+    });
+  }
+  crumbs.push({ name: product.name, url: canonical });
+
+  // Rich-result enhancements: aggregateRating (only when we actually have
+  // reviews) and priceValidUntil (1y from today, a Google hard requirement
+  // for Offer rich results).  Magento's `rating_summary` is a 0–100 score so
+  // we convert to the canonical 0–5 star value.
+  const reviewCount = product.review_count ?? 0;
+  const ratingSummary = product.rating_summary ?? null;
+  const aggregateRating =
+    reviewCount > 0 && ratingSummary != null
+      ? { ratingValue: ratingSummary / 20, reviewCount }
+      : null;
+
+  const priceValidUntil = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 365);
+    return d.toISOString().slice(0, 10);
+  })();
+
+  const productLdBlock = productLd(product as unknown as ProductLike, SITE_URL, {
+    aggregateRating,
+    priceValidUntil,
+  });
+
+  const jsonLd: unknown[] = [
+    graphLd([breadcrumbLd(crumbs), productLdBlock]),
+  ];
+
+  const ogImage = mainImage
+    ? mainImage.startsWith("http")
+      ? mainImage
+      : new URL(mainImage, SITE_URL).toString()
+    : undefined;
+
+  productView = {
+    p: product,
+    mainImage,
+    mainLabel: mainLabel ?? product.name,
+    gallery,
+    price,
+    currency,
+    onSale,
+    inStock,
+    shortHtml,
+    longHtml,
+    shortText,
+    canonical,
+    crumbs,
+    jsonLd,
+    ogImage,
+  };
+}
+
+// Category-branch derivations
+let categoryView: null | {
+  title: string;
+  descriptionHtml: string;
+  metaDescription: string;
+  canonical: string;
+  crumbs: BreadcrumbItem[];
+  jsonLd: unknown[];
+  totalPages: number;
+  currentPage: number;
+  hasPrev: boolean;
+  hasNext: boolean;
+  prevHref: string;
+  nextHref: string;
+  basePath: string;
+  absPrev: string | undefined;
+  absNext: string | undefined;
+} = null;
+
+if (category && categoryProducts) {
+  const title = category.name ?? segmentLabel(slugNoSuffix);
+  const descriptionHtml = category.description ? sanitizeHtml(category.description) : "";
+  const metaDescription = category.description
+    ? (category.description
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 160) || `Shop ${title}.`)
+    : category.meta_description ?? `Shop ${title} on mage2react.`;
+
+  const basePath = `/${slugNoSuffix}.html`;
+  const totalPages = categoryProducts.page_info.total_pages;
+  const currentPage = categoryProducts.page_info.current_page;
+  const hasPrev = currentPage > 1;
+  const hasNext = currentPage < totalPages;
+  const prevHref = `${basePath}?page=${currentPage - 1}`;
+  const nextHref = `${basePath}?page=${currentPage + 1}`;
+
+  // Canonical rules for category pages:
+  //   - Strip ?page=1 (identical content to ?no-page).
+  //   - Keep ?page=N for N>1 (pagination variants share their own canonical).
+  //   - Exclude sort, pageSize, dir, view — they produce sort variants that
+  //     MUST funnel back to the base URL for duplicate-content protection.
+  //   - Layered-nav filters (everything NOT in RESERVED_PARAMS) are NOT
+  //     canonicalised — filtered URLs always point back to the unfiltered
+  //     base. Faceted combos are crawler traps.
+  const hasFilters = (() => {
+    const RESERVED = new Set(["page", "p", "pageSize", "ps", "sort", "dir", "view", "q"]);
+    for (const key of Astro.url.searchParams.keys()) {
+      if (!RESERVED.has(key)) return true;
+    }
+    return false;
+  })();
+
+  const canonical = hasFilters
+    ? new URL(basePath, SITE_URL).toString()
+    : currentPage > 1
+      ? new URL(`${basePath}?page=${currentPage}`, SITE_URL).toString()
+      : new URL(basePath, SITE_URL).toString();
+
+  const absPrev = hasPrev
+    ? new URL(
+        currentPage - 1 === 1 ? basePath : `${basePath}?page=${currentPage - 1}`,
+        SITE_URL,
+      ).toString()
+    : undefined;
+  const absNext = hasNext
+    ? new URL(`${basePath}?page=${currentPage + 1}`, SITE_URL).toString()
+    : undefined;
+
+  const crumbs: BreadcrumbItem[] = [
+    { name: "Home", url: new URL("/", SITE_URL).toString() },
+  ];
+  if (category.breadcrumbs) {
+    for (const b of category.breadcrumbs) {
+      if (!b.category_url_path || !b.category_name) continue;
+      crumbs.push({
+        name: b.category_name,
+        url: new URL(`/${b.category_url_path}.html`, SITE_URL).toString(),
+      });
+    }
+  }
+  crumbs.push({ name: title, url: canonical });
+
+  const jsonLd: unknown[] = [
+    graphLd([
+      breadcrumbLd(crumbs),
+      collectionPageLd(
+        title,
+        metaDescription,
+        canonical,
+        categoryProducts.total_count,
+      ),
+      itemListLd(
+        categoryProducts.items as ProductCardLike[],
+        (p) => (p.url_key ? `/${p.url_key}.html` : basePath),
+        SITE_URL,
+      ),
+    ]),
+  ];
+
+  categoryView = {
+    title,
+    descriptionHtml,
+    metaDescription,
+    canonical,
+    crumbs,
+    jsonLd,
+    totalPages,
+    currentPage,
+    hasPrev,
+    hasNext,
+    prevHref,
+    nextHref,
+    basePath,
+    absPrev,
+    absNext,
+  };
+}
+
+// CMS-branch derivations
+let cmsView: null | {
+  title: string;
+  heading: string;
+  contentHtml: string;
+  metaDescription: string;
+  canonical: string;
+  crumbs: BreadcrumbItem[];
+  jsonLd: unknown[];
+} = null;
+
+if (cmsPage) {
+  const title = cmsPage.meta_title ?? cmsPage.title ?? segmentLabel(slugNoSuffix);
+  const heading = cmsPage.content_heading ?? cmsPage.title ?? title;
+  const contentHtml = cmsPage.content ? sanitizeHtml(cmsPage.content) : "";
+  const metaDescription = cmsPage.meta_description
+    ? cmsPage.meta_description.slice(0, 160)
+    : heading;
+  const canonical = new URL(`/${slugNoSuffix}`, SITE_URL).toString();
+  const crumbs: BreadcrumbItem[] = [
+    { name: "Home", url: new URL("/", SITE_URL).toString() },
+    { name: heading, url: canonical },
+  ];
+  const crumbLd = breadcrumbLd(crumbs);
+  const jsonLd: unknown[] = [
+    graphLd([webPageLd(title, metaDescription, canonical, crumbLd), crumbLd]),
+  ];
+  cmsView = { title, heading, contentHtml, metaDescription, canonical, crumbs, jsonLd };
+}
+
+// If the resolver said `PRODUCT` / `CATEGORY` / `CMS_PAGE` but we failed to
+// hydrate the entity (deleted, disabled, storefront-scope mismatch, etc.),
+// fall back to the proxy so the user still sees something rather than a 404.
+if (finalResolved.type === "PRODUCT" && !product) {
+  const p = await renderProxy();
+  if (p) return p;
+  Astro.response.status = 404;
+}
+if (finalResolved.type === "CATEGORY" && (!category || !categoryProducts)) {
+  const p = await renderProxy();
+  if (p) return p;
+  Astro.response.status = 404;
+}
+if (finalResolved.type === "CMS_PAGE" && !cmsPage) {
+  const p = await renderProxy();
+  if (p) return p;
+  Astro.response.status = 404;
+}
+---
+{productView && (
+  <Layout
+    title={productView.p.meta_title ?? productView.p.name}
+    description={productView.p.meta_description ?? productView.shortText}
+    canonical={productView.canonical}
+    ogImage={productView.ogImage}
+    ogImageAlt={productView.ogImage ? productView.mainLabel : undefined}
+    ogType="product"
+    jsonLd={productView.jsonLd}
+    heroImage={productView.mainImage ?? undefined}
+  >
+    <Breadcrumbs items={productView.crumbs} />
+
+    <article class="grid gap-10 lg:grid-cols-2">
+      <div>
+        <Gallery images={productView.gallery} productName={productView.p.name} />
+      </div>
+
+      <div>
+        <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">{productView.p.name}</h1>
+        <p class="mt-2 text-sm text-zinc-500">SKU: {productView.p.sku}</p>
+
+        {productView.p.__typename !== "ConfigurableProduct" &&
+         productView.p.__typename !== "BundleProduct" &&
+         productView.p.__typename !== "DownloadableProduct" && (
+          <div class="mt-6 flex items-baseline gap-3">
+            <span class="text-3xl font-bold">
+              {formatMoney(productView.p.price_range.minimum_price.final_price.value, productView.currency)}
+            </span>
+            {productView.onSale && (
+              <span class="text-lg text-zinc-400 line-through">
+                {formatMoney(productView.p.price_range.minimum_price.regular_price.value, productView.currency)}
+              </span>
+            )}
+          </div>
+        )}
+
+        <p class={`mt-3 text-sm font-medium ${productView.inStock ? "text-emerald-600" : "text-red-600"}`}>
+          {productView.inStock ? "In stock" : "Out of stock"}
+          {productView.p.only_x_left_in_stock != null && productView.p.only_x_left_in_stock > 0 && (
+            <span class="ml-2 text-zinc-500">
+              only {productView.p.only_x_left_in_stock} left
+            </span>
+          )}
+        </p>
+
+        {productView.shortHtml && (
+          <div class="prose prose-sm mt-6 max-w-none text-zinc-700" set:html={productView.shortHtml} />
+        )}
+
+        {/* Out-of-stock banner; hides the buy section entirely */}
+        {!productView.inStock ? (
+          <div class="mt-8 rounded-xl border border-red-200 bg-red-50 p-6 text-center">
+            <p class="font-semibold text-red-700">Out of stock</p>
+            <p class="mt-1 text-sm text-red-600">This item is currently unavailable. Check back soon.</p>
+          </div>
+        ) : (
+          <>
+        {/* Type-specific option UI */}
+        {productView.p.__typename === "ConfigurableProduct" && (
+          <ConfigurableOptions
+            client:visible
+            parentSku={productView.p.sku}
+            parentName={productView.p.name}
+            parentImage={productView.mainImage}
+            fallbackPrice={productView.price}
+            fallbackCurrency={productView.currency}
+            options={productView.p.configurable_options ?? []}
+            variants={productView.p.variants ?? []}
+          />
+        )}
+
+        {productView.p.__typename === "BundleProduct" && (
+          <BundleOptions
+            client:visible
+            parentSku={productView.p.sku}
+            parentName={productView.p.name}
+            parentImage={productView.mainImage}
+            fallbackPrice={productView.price}
+            fallbackCurrency={productView.currency}
+            items={productView.p.items ?? []}
+          />
+        )}
+
+        {productView.p.__typename === "GroupedProduct" && (
+          <GroupedItems items={productView.p.items ?? []} />
+        )}
+
+        {productView.p.__typename === "DownloadableProduct" && (
+          <DownloadableLinks
+            client:visible
+            parentSku={productView.p.sku}
+            parentName={productView.p.name}
+            parentImage={productView.mainImage}
+            basePrice={productView.price}
+            currency={productView.currency}
+            links={productView.p.downloadable_product_links ?? []}
+            linksTitle={productView.p.links_title ?? null}
+          />
+        )}
+
+        {(productView.p.__typename === "SimpleProduct" ||
+          productView.p.__typename === "VirtualProduct" ||
+          (productView.p.__typename !== "ConfigurableProduct" &&
+           productView.p.__typename !== "BundleProduct" &&
+           productView.p.__typename !== "GroupedProduct" &&
+           productView.p.__typename !== "DownloadableProduct")) && (
+          <div class="mt-8">
+            <AddToCartButton
+              client:visible
+              sku={productView.p.sku}
+              name={productView.p.name}
+              price={productView.price}
+              currency={productView.currency}
+              image={productView.mainImage}
+            />
+          </div>
+        )}
+          </>
+        )}
+
+        {productView.longHtml && (
+          <details class="mt-12 border-t border-zinc-200 pt-8" open>
+            <summary class="cursor-pointer text-lg font-semibold">Details</summary>
+            <div class="prose prose-sm mt-4 max-w-none text-zinc-700" set:html={productView.longHtml} />
+          </details>
+        )}
+      </div>
+    </article>
+
+    {productView.p.related_products && productView.p.related_products.length > 0 && (
+      <section class="mt-16">
+        <h2 class="mb-6 text-2xl font-bold tracking-tight">You might also like</h2>
+        <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          {productView.p.related_products.map((rp) => (
+            <ProductCard product={rp} />
+          ))}
+        </div>
+      </section>
+    )}
+
+    {productView.p.upsell_products && productView.p.upsell_products.length > 0 && (
+      <section class="mt-16">
+        <h2 class="mb-6 text-2xl font-bold tracking-tight">We recommend</h2>
+        <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          {productView.p.upsell_products.map((rp) => (
+            <ProductCard product={rp} />
+          ))}
+        </div>
+      </section>
+    )}
+
+    {productView.p.crosssell_products && productView.p.crosssell_products.length > 0 && (
+      <section class="mt-16">
+        <h2 class="mb-6 text-2xl font-bold tracking-tight">Customers also bought</h2>
+        <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          {productView.p.crosssell_products.map((rp) => (
+            <ProductCard product={rp} />
+          ))}
+        </div>
+      </section>
+    )}
+  </Layout>
+)}
+
+{categoryView && categoryProducts && category && (
+  <Layout
+    title={category.meta_title ?? categoryView.title}
+    description={categoryView.metaDescription}
+    canonical={categoryView.canonical}
+    ogType="website"
+    jsonLd={categoryView.jsonLd}
+    prev={categoryView.absPrev}
+    next={categoryView.absNext}
+  >
+    <Breadcrumbs items={categoryView.crumbs} />
+
+    <header class="mb-8 border-b border-zinc-200 pb-6">
+      <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">{categoryView.title}</h1>
+      {categoryView.descriptionHtml && (
+        <div class="prose prose-sm mt-4 max-w-none text-zinc-600" set:html={categoryView.descriptionHtml} />
+      )}
+      {category.display_mode !== "PAGE" && (
+        <p class="mt-3 text-sm text-zinc-500">
+          {categoryProducts.total_count} {categoryProducts.total_count === 1 ? "product" : "products"}
+        </p>
+      )}
+    </header>
+
+    {category.cms_block?.content && (
+      <section
+        class="prose mb-10 max-w-none text-zinc-800"
+        aria-label={category.cms_block.title ?? undefined}
+        set:html={sanitizeHtml(category.cms_block.content)}
+      />
+    )}
+
+    {/* Subcategory tiles — always show when there are children, serves as
+        a hub for non-anchor parents and as a CMS-block-alternative when
+        Magento admin hasn't configured one. */}
+    {category.children && category.children.length > 0 && (
+      <section class="mb-10">
+        <h2 class="mb-4 text-lg font-semibold text-zinc-900">Shop by category</h2>
+        <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          {category.children.map((child) => (
+            <a
+              href={`/${child.url_path}.html`}
+              class="group relative overflow-hidden rounded-xl border border-zinc-200 bg-gradient-to-br from-zinc-100 to-zinc-50 p-6 transition hover:shadow-md"
+            >
+              <h3 class="text-lg font-semibold text-zinc-900 group-hover:text-[var(--color-brand)]">
+                {child.name}
+              </h3>
+              {child.product_count != null && child.product_count > 0 && (
+                <p class="mt-1 text-sm text-zinc-500">
+                  {child.product_count} {child.product_count === 1 ? "product" : "products"}
+                </p>
+              )}
+              <span class="mt-4 inline-flex items-center gap-1 text-sm font-medium text-[var(--color-brand)]">
+                Shop now
+                <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path d="M5 12h14M13 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </span>
+            </a>
+          ))}
+        </div>
+      </section>
+    )}
+
+    {/* Show products unless display_mode=PAGE AND a cms_block is configured. */}
+    {category.display_mode === "PAGE" && category.cms_block?.content ? null : categoryProducts.items.length === 0 ? (
+      <div class="rounded-xl border border-dashed border-zinc-300 p-12 text-center text-zinc-500">
+        {category.children && category.children.length > 0
+          ? "Browse the subcategories above."
+          : "No products in this category yet."}
+      </div>
+    ) : (
+      <>
+        <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          {categoryProducts.items.map((p, idx) => (
+            <ProductCard product={p} eager={idx < 4} />
+          ))}
+        </div>
+
+        {categoryView.totalPages > 1 && (
+          <nav class="mt-10 flex items-center justify-between" aria-label="Pagination">
+            {categoryView.hasPrev ? (
+              <a href={categoryView.prevHref} class="inline-flex items-center rounded-full border border-zinc-300 px-5 py-2 text-sm font-medium hover:bg-zinc-50" rel="prev">← Previous</a>
+            ) : (
+              <span class="inline-flex items-center rounded-full border border-zinc-200 px-5 py-2 text-sm font-medium text-zinc-300">← Previous</span>
+            )}
+            <span class="text-sm text-zinc-500">
+              Page {categoryView.currentPage} of {categoryView.totalPages}
+            </span>
+            {categoryView.hasNext ? (
+              <a href={categoryView.nextHref} class="inline-flex items-center rounded-full border border-zinc-300 px-5 py-2 text-sm font-medium hover:bg-zinc-50" rel="next">Next →</a>
+            ) : (
+              <span class="inline-flex items-center rounded-full border border-zinc-200 px-5 py-2 text-sm font-medium text-zinc-300">Next →</span>
+            )}
+          </nav>
+        )}
+      </>
+    )}
+  </Layout>
+)}
+
+{cmsView && (
+  <Layout
+    title={cmsView.title}
+    description={cmsView.metaDescription}
+    canonical={cmsView.canonical}
+    jsonLd={cmsView.jsonLd}
+  >
+    <Breadcrumbs items={cmsView.crumbs} />
+    {cmsView.heading && (
+      <h1 class="mb-6 text-3xl font-bold tracking-tight sm:text-4xl">{cmsView.heading}</h1>
+    )}
+    {cmsView.contentHtml && (
+      <div class="prose max-w-none text-zinc-800" set:html={cmsView.contentHtml} />
+    )}
+  </Layout>
+)}
+
+{!productView && !cmsView && !(categoryView && categoryProducts && category) && (
+  <Layout title="Page not found" description="We couldn't find what you were looking for." noindex>
+    <div class="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 px-6 py-20 text-center">
+      <h1 class="text-4xl font-bold tracking-tight">Page not found</h1>
+      <p class="mt-4 text-zinc-600">We couldn't find <code class="rounded bg-zinc-200 px-1">{Astro.url.pathname}</code>.</p>
+      <a href="/" class="mt-8 inline-flex items-center rounded-full bg-[var(--color-brand)] px-6 py-3 text-sm font-medium text-white hover:bg-[var(--color-brand-dark)]">Back to home</a>
+    </div>
+  </Layout>
+)}

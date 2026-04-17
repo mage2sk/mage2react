@@ -1,0 +1,41 @@
+---
+import { CART_COOKIE_NAME, getCart } from "~/lib/queries-cart";
+import { getCustomerToken } from "~/lib/auth";
+
+/**
+ * /checkout — thin router.
+ *
+ * If the browser arrives here with an empty or missing cart, bounce to the
+ * cart page (which already has empty-cart UX). Otherwise send to step 1 of
+ * the React checkout — `/checkout/shipping`.
+ *
+ * We're optimistic — any Magento hiccup at this stage should not block the
+ * customer from reaching the shipping form, which has its own error states.
+ */
+export const prerender = false;
+
+const cartId = Astro.cookies.get(CART_COOKIE_NAME)?.value ?? null;
+const token = getCustomerToken(Astro);
+
+// If no cart id yet, send them to the cart page for empty-cart UX.
+if (!cartId) {
+  return Astro.redirect("/checkout/cart", 303);
+}
+
+// Best-effort cart check — never block the user on a GraphQL error here.
+try {
+  const cart = await getCart(cartId);
+  if (cart && cart.total_quantity === 0) {
+    return Astro.redirect("/checkout/cart", 303);
+  }
+  // If `cart` is null (expired / customer-merged) but the user is logged in,
+  // fall through to /checkout/shipping — the shipping page will resolve the
+  // customer's active cart or recover gracefully.
+} catch {
+  // swallow — the shipping page handles its own errors.
+}
+
+void token; // keep reference; future: auto-merge guest → customer cart here.
+
+return Astro.redirect("/checkout/shipping", 303);
+---

@@ -1,0 +1,265 @@
+---
+import AccountLayout from "~/components/customer/AccountLayout.astro";
+import {
+  getCustomerOrder,
+  friendlyAuthError,
+  addSkuToCart,
+} from "~/lib/queries-customer";
+import { clearCustomerToken, requireAuth } from "~/lib/auth";
+import { formatMoney } from "~/lib/money";
+import { getOrCreateCartId } from "~/lib/queries-cart";
+import type { OrderAddressT, OrderItemDetailT } from "~/lib/queries-customer";
+
+const auth = requireAuth(Astro);
+if (auth instanceof Response) return auth;
+const token = auth;
+
+const orderNumber = String(Astro.params.number ?? "").trim();
+if (!orderNumber) {
+  return Astro.redirect("/sales/order/history?flash=order_not_found", 303);
+}
+
+let order;
+try {
+  order = await getCustomerOrder(token, orderNumber);
+} catch (err) {
+  console.warn("[order-view] load failed", {
+    orderNumber,
+    message: err instanceof Error ? err.message : String(err),
+  });
+  clearCustomerToken(Astro);
+  return Astro.redirect("/customer/account/login?flash=session_expired", 303);
+}
+
+if (!order) {
+  return Astro.redirect("/sales/order/history?flash=order_not_found", 303);
+}
+
+let actionMessage: string | null = null;
+let actionVariant: "success" | "error" | "info" | "warning" = "success";
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  const intent = String(form.get("intent") ?? "");
+  if (intent === "reorder") {
+    try {
+      const cartId = await getOrCreateCartId(Astro.cookies);
+      const items = (order.items ?? []).filter(
+        (i): i is OrderItemDetailT => i != null && typeof i.product_sku === "string",
+      );
+      let added = 0;
+      const errorMessages: string[] = [];
+      for (const item of items) {
+        const sku = item.product_sku;
+        if (!sku) continue;
+        const qty = Math.max(1, Math.floor(item.quantity_ordered ?? 1));
+        try {
+          const res = await addSkuToCart(cartId, sku, qty);
+          if (res.userErrors.length > 0) {
+            errorMessages.push(...res.userErrors.map((e) => e.message));
+          } else {
+            added++;
+          }
+        } catch (err) {
+          console.warn("[order-view] reorder add failed", {
+            sku,
+            message: err instanceof Error ? err.message : String(err),
+          });
+          errorMessages.push(`Could not add ${sku} to cart.`);
+        }
+      }
+      if (added === 0) {
+        actionMessage = errorMessages[0] ?? "None of the items could be added to your cart.";
+        actionVariant = "error";
+      } else if (errorMessages.length > 0) {
+        actionMessage = `Added ${added} item(s) to your cart; some items were unavailable.`;
+        actionVariant = "warning";
+      } else {
+        actionMessage = `Added ${added} item(s) to your cart.`;
+        actionVariant = "success";
+      }
+    } catch (err) {
+      console.warn("[order-view] reorder failed", {
+        message: err instanceof Error ? err.message : String(err),
+      });
+      actionMessage = friendlyAuthError(err);
+      actionVariant = "error";
+    }
+  }
+}
+
+function fmtDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
+}
+
+function addrLines(addr: OrderAddressT | null | undefined): string[] {
+  if (!addr) return [];
+  const lines: string[] = [];
+  const name = [addr.firstname, addr.lastname].filter(Boolean).join(" ");
+  if (name) lines.push(name);
+  for (const s of addr.street ?? []) if (s) lines.push(s);
+  const cityLine = [
+    addr.city,
+    [addr.region ?? null, addr.postcode].filter(Boolean).join(" "),
+  ]
+    .filter(Boolean)
+    .join(", ");
+  if (cityLine) lines.push(cityLine);
+  if (addr.country_code) lines.push(addr.country_code);
+  if (addr.telephone) lines.push(`T: ${addr.telephone}`);
+  return lines;
+}
+
+const items = (order.items ?? []).filter(
+  (i): i is OrderItemDetailT => i != null,
+);
+
+const tracking = (order.shipments ?? []).flatMap((s) => s.tracking ?? []);
+---
+<AccountLayout
+  title={`Order #${order.number}`}
+  pageHeading={`Order #${order.number}`}
+  description={`Placed on ${fmtDate(order.order_date)} · Status: ${order.status}`}
+  flashMessage={actionMessage}
+  flashVariant={actionVariant}
+>
+  <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
+    <a href="/sales/order/history" class="text-sm font-medium text-zinc-600 hover:text-zinc-900">
+      <i class="bi bi-arrow-left mr-1" aria-hidden="true"></i>Back to My Orders
+    </a>
+    <form method="post">
+      <input type="hidden" name="intent" value="reorder" />
+      <button
+        type="submit"
+        class="inline-flex items-center rounded-full bg-zinc-900 px-5 py-2 text-sm font-semibold text-white hover:bg-zinc-800"
+      >
+        <i class="bi bi-arrow-repeat mr-1" aria-hidden="true"></i>Reorder
+      </button>
+    </form>
+  </div>
+
+  <section class="rounded-xl border border-zinc-200 bg-white">
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-zinc-200 text-sm">
+        <thead class="bg-zinc-50 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500">
+          <tr>
+            <th class="px-4 py-3">Product</th>
+            <th class="px-4 py-3">SKU</th>
+            <th class="px-4 py-3">Price</th>
+            <th class="px-4 py-3">Qty</th>
+            <th class="px-4 py-3 text-right">Subtotal</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-zinc-200">
+          {items.map((item) => {
+            const qty = item.quantity_ordered ?? 0;
+            const priceVal = item.product_sale_price?.value ?? null;
+            const priceCur = item.product_sale_price?.currency ?? null;
+            const subtotal = priceVal != null ? priceVal * qty : null;
+            const url = item.product_url_key ? `/${item.product_url_key}.html` : null;
+            return (
+              <tr>
+                <td class="px-4 py-3">
+                  <div class="flex flex-col">
+                    {url ? (
+                      <a href={url} class="font-medium hover:underline">
+                        {item.product_name ?? "—"}
+                      </a>
+                    ) : (
+                      <span class="font-medium">{item.product_name ?? "—"}</span>
+                    )}
+                    {item.selected_options && item.selected_options.length > 0 && (
+                      <ul class="mt-1 text-xs text-zinc-500">
+                        {item.selected_options.map((opt) => (
+                          <li>{opt.label}: {opt.value}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </td>
+                <td class="px-4 py-3 font-mono text-xs">{item.product_sku ?? ""}</td>
+                <td class="px-4 py-3">{formatMoney(priceVal, priceCur)}</td>
+                <td class="px-4 py-3">{qty}</td>
+                <td class="px-4 py-3 text-right">{formatMoney(subtotal, priceCur)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+        <tfoot class="border-t border-zinc-200 bg-zinc-50 text-sm">
+          <tr>
+            <td colspan="4" class="px-4 py-2 text-right text-zinc-600">Subtotal</td>
+            <td class="px-4 py-2 text-right">
+              {formatMoney(
+                order.total?.subtotal?.value ?? null,
+                order.total?.subtotal?.currency ?? null,
+              )}
+            </td>
+          </tr>
+          <tr>
+            <td colspan="4" class="px-4 py-2 text-right text-zinc-600">Shipping &amp; Handling</td>
+            <td class="px-4 py-2 text-right">
+              {formatMoney(
+                order.total?.shipping_handling?.amount_including_tax?.value ?? null,
+                order.total?.shipping_handling?.amount_including_tax?.currency ?? null,
+              )}
+            </td>
+          </tr>
+          {(order.total?.taxes ?? []).map((tax) => (
+            <tr>
+              <td colspan="4" class="px-4 py-2 text-right text-zinc-600">{tax.title ?? "Tax"}</td>
+              <td class="px-4 py-2 text-right">
+                {formatMoney(tax.amount.value, tax.amount.currency)}
+              </td>
+            </tr>
+          ))}
+          <tr class="font-semibold">
+            <td colspan="4" class="px-4 py-3 text-right">Grand Total</td>
+            <td class="px-4 py-3 text-right">
+              {formatMoney(
+                order.total?.grand_total?.value ?? null,
+                order.total?.grand_total?.currency ?? null,
+              )}
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </section>
+
+  <section class="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+    <article class="rounded-xl border border-zinc-200 bg-white p-5">
+      <h2 class="mb-2 text-sm font-semibold">Shipping Address</h2>
+      <address class="not-italic text-sm text-zinc-700">
+        {addrLines(order.shipping_address).length > 0
+          ? addrLines(order.shipping_address).map((line) => <div>{line}</div>)
+          : <p class="text-zinc-500">—</p>}
+      </address>
+    </article>
+    <article class="rounded-xl border border-zinc-200 bg-white p-5">
+      <h2 class="mb-2 text-sm font-semibold">Billing Address</h2>
+      <address class="not-italic text-sm text-zinc-700">
+        {addrLines(order.billing_address).length > 0
+          ? addrLines(order.billing_address).map((line) => <div>{line}</div>)
+          : <p class="text-zinc-500">—</p>}
+      </address>
+    </article>
+  </section>
+
+  {tracking.length > 0 && (
+    <section class="mt-6 rounded-xl border border-zinc-200 bg-white p-5">
+      <h2 class="mb-3 text-sm font-semibold">Tracking Information</h2>
+      <ul class="text-sm text-zinc-700">
+        {tracking.map((t) => (
+          <li class="flex flex-wrap items-baseline gap-2">
+            <span class="font-medium">{t.title ?? t.carrier ?? "Shipment"}:</span>
+            <span class="font-mono text-xs">{t.number ?? "—"}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
+</AccountLayout>

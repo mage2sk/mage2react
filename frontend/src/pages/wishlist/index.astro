@@ -1,0 +1,164 @@
+---
+import AccountLayout from "~/components/customer/AccountLayout.astro";
+import {
+  getWishlist,
+  removeProductsFromWishlist,
+  addSkuToCart,
+  friendlyAuthError,
+} from "~/lib/queries-customer";
+import { clearCustomerToken, requireAuth } from "~/lib/auth";
+import { getOrCreateCartId } from "~/lib/queries-cart";
+import { formatMoney } from "~/lib/money";
+
+const auth = requireAuth(Astro);
+if (auth instanceof Response) return auth;
+const token = auth;
+
+let actionMessage: string | null = null;
+let actionVariant: "success" | "error" | "info" | "warning" = "success";
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  const intent = String(form.get("intent") ?? "");
+  const wishlistId = String(form.get("wishlist_id") ?? "");
+  const itemId = String(form.get("item_id") ?? "");
+  const sku = String(form.get("sku") ?? "");
+
+  if (intent === "remove" && wishlistId && itemId) {
+    try {
+      await removeProductsFromWishlist(token, wishlistId, [itemId]);
+      return Astro.redirect("/wishlist?flash=wishlist_removed", 303);
+    } catch (err) {
+      console.warn("[wishlist] remove failed", {
+        message: err instanceof Error ? err.message : String(err),
+      });
+      actionMessage = friendlyAuthError(err);
+      actionVariant = "error";
+    }
+  } else if (intent === "add_to_cart" && sku) {
+    try {
+      const cartId = await getOrCreateCartId(Astro.cookies);
+      const res = await addSkuToCart(cartId, sku, 1);
+      if (res.userErrors.length > 0) {
+        actionMessage = res.userErrors[0]?.message ?? "Could not add to cart.";
+        actionVariant = "error";
+      } else {
+        actionMessage = "Item added to your cart.";
+        actionVariant = "success";
+      }
+    } catch (err) {
+      console.warn("[wishlist] add-to-cart failed", {
+        message: err instanceof Error ? err.message : String(err),
+      });
+      actionMessage = friendlyAuthError(err);
+      actionVariant = "error";
+    }
+  }
+}
+
+let wishlist;
+try {
+  wishlist = await getWishlist(token);
+} catch (err) {
+  console.warn("[wishlist] load failed", {
+    message: err instanceof Error ? err.message : String(err),
+  });
+  clearCustomerToken(Astro);
+  return Astro.redirect("/customer/account/login?flash=session_expired", 303);
+}
+
+const items = wishlist?.items_v2?.items ?? [];
+---
+<AccountLayout
+  title="My Wishlist"
+  pageHeading="My Wishlist"
+  flashMessage={actionMessage}
+  flashVariant={actionVariant}
+>
+  {items.length === 0 ? (
+    <p class="rounded-xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500">
+      You have no items in your wishlist.
+    </p>
+  ) : (
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {items.map((item) => {
+        if (!item.product) return null;
+        const p = item.product;
+        const href = p.url_key ? `/${p.url_key}${p.url_suffix ?? ".html"}` : "#";
+        const priceVal = p.price_range.minimum_price.final_price.value;
+        const priceCur = p.price_range.minimum_price.final_price.currency;
+        const inStock = (p.stock_status ?? "IN_STOCK") === "IN_STOCK";
+        return (
+          <article class="flex flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white">
+            <a href={href} class="block aspect-square bg-zinc-50">
+              {p.small_image?.url ? (
+                <img
+                  src={p.small_image.url}
+                  alt={p.small_image.label ?? p.name}
+                  width={400}
+                  height={400}
+                  loading="lazy"
+                  decoding="async"
+                  class="h-full w-full object-cover"
+                />
+              ) : (
+                <div class="flex h-full w-full items-center justify-center text-zinc-300">
+                  <i class="bi bi-image" aria-hidden="true"></i>
+                </div>
+              )}
+            </a>
+            <div class="flex flex-1 flex-col p-4">
+              <a href={href} class="mb-1 text-sm font-medium text-zinc-900 hover:underline">
+                {p.name}
+              </a>
+              <p class="mb-3 text-sm text-zinc-700">{formatMoney(priceVal, priceCur)}</p>
+              <div class="mt-auto flex items-center gap-2">
+                {inStock && wishlist ? (
+                  <form method="post" class="flex-1">
+                    <input type="hidden" name="intent" value="add_to_cart" />
+                    <input type="hidden" name="sku" value={p.sku} />
+                    <button
+                      type="submit"
+                      class="inline-flex w-full items-center justify-center rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800"
+                    >
+                      <i class="bi bi-bag-plus mr-1" aria-hidden="true"></i>Add to Cart
+                    </button>
+                  </form>
+                ) : (
+                  <span class="flex-1 rounded-full bg-zinc-100 px-4 py-2 text-center text-sm text-zinc-500">
+                    Out of Stock
+                  </span>
+                )}
+                {wishlist && (
+                  <form method="post" data-confirm="Remove this item from your wishlist?">
+                    <input type="hidden" name="intent" value="remove" />
+                    <input type="hidden" name="wishlist_id" value={wishlist.id} />
+                    <input type="hidden" name="item_id" value={item.id} />
+                    <button
+                      type="submit"
+                      aria-label="Remove from wishlist"
+                      title="Remove from wishlist"
+                      class="inline-flex items-center justify-center rounded-full border border-zinc-300 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
+                    >
+                      <i class="bi bi-trash" aria-hidden="true"></i>
+                      <span>Remove</span>
+                    </button>
+                  </form>
+                )}
+              </div>
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  )}
+</AccountLayout>
+
+<script>
+  for (const form of document.querySelectorAll<HTMLFormElement>("form[data-confirm]")) {
+    form.addEventListener("submit", (e) => {
+      const msg = form.getAttribute("data-confirm") ?? "Are you sure?";
+      if (!window.confirm(msg)) e.preventDefault();
+    });
+  }
+</script>

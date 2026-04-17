@@ -1,0 +1,38 @@
+---
+/**
+ * <Breadcrumbs/> — accessible, visible breadcrumb navigation.
+ * Structured data is emitted via <Seo jsonLd={breadcrumbLd(items)} />
+ * from the caller; this component only renders the visible markup.
+ */
+export interface BreadcrumbItem {
+  name: string;
+  url: string;
+}
+
+export interface Props {
+  items: BreadcrumbItem[];
+}
+
+const { items } = Astro.props;
+---
+{items.length > 0 && (
+  <nav aria-label="Breadcrumb" class="mb-6 text-sm text-zinc-500">
+    <ol class="flex flex-wrap items-center gap-1">
+      {items.map((item, index) => {
+        const isLast = index === items.length - 1;
+        return (
+          <li class="flex items-center gap-1">
+            {isLast ? (
+              <span class="text-zinc-900" aria-current="page">{item.name}</span>
+            ) : (
+              <>
+                <a href={item.url} class="hover:text-zinc-900">{item.name}</a>
+                <span class="mx-1 text-zinc-300" aria-hidden="true">/</span>
+              </>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  </nav>
+)}

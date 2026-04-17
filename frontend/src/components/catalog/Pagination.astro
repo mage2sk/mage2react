@@ -1,0 +1,116 @@
+---
+/**
+ * <Pagination/> — server-rendered prev / page-numbers / next.
+ *
+ * Preserves all other query params. Never renders `page=1` explicitly so the
+ * canonical URL for the first page stays clean.
+ */
+
+import type { PageInfoT } from "~/lib/queries-catalog";
+import { setParam, buildHref } from "~/lib/url-filters";
+
+export interface Props {
+  pageInfo: PageInfoT;
+  basePath: string;
+  activeFilters: URLSearchParams;
+  /** Max number of numbered links to render in the middle (excluding prev/next). */
+  windowSize?: number;
+}
+
+const { pageInfo, basePath, activeFilters, windowSize = 7 } = Astro.props;
+const { current_page: current, total_pages: total } = pageInfo;
+
+function hrefFor(page: number): string {
+  if (page <= 1) {
+    const next = setParam(activeFilters, "page", "");
+    next.delete("p");
+    return buildHref(basePath, next);
+  }
+  const next = setParam(activeFilters, "page", String(page));
+  next.delete("p");
+  return buildHref(basePath, next);
+}
+
+// Compute the page-number window: always include 1, current, total, and a
+// contiguous range around current. Insert a gap marker (0) where we skip.
+function pageRange(cur: number, tot: number, size: number): Array<number | "…"> {
+  if (tot <= size) return Array.from({ length: tot }, (_, i) => i + 1);
+  const half = Math.floor(size / 2);
+  let start = Math.max(2, cur - half);
+  let end = Math.min(tot - 1, cur + half);
+  if (cur - start < half) end = Math.min(tot - 1, end + (half - (cur - start)));
+  if (end - cur < half) start = Math.max(2, start - (half - (end - cur)));
+
+  const result: Array<number | "…"> = [1];
+  if (start > 2) result.push("…");
+  for (let i = start; i <= end; i++) result.push(i);
+  if (end < tot - 1) result.push("…");
+  result.push(tot);
+  return result;
+}
+
+const hasPrev = current > 1;
+const hasNext = current < total;
+const pages = total > 0 ? pageRange(current, total, windowSize) : [];
+---
+{total > 1 && (
+  <nav class="mt-8 flex items-center justify-center gap-1" aria-label="Pagination">
+    {hasPrev ? (
+      <a
+        href={hrefFor(current - 1)}
+        rel="prev"
+        class="inline-flex items-center gap-1 rounded border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:border-zinc-900 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
+      >
+        <span aria-hidden="true">←</span>
+        <span class="sr-only sm:not-sr-only">Previous</span>
+      </a>
+    ) : (
+      <span class="inline-flex items-center gap-1 rounded border border-zinc-200 px-3 py-1.5 text-sm font-medium text-zinc-300" aria-disabled="true">
+        <span aria-hidden="true">←</span>
+        <span class="sr-only sm:not-sr-only">Previous</span>
+      </span>
+    )}
+
+    <ol class="flex items-center gap-1">
+      {pages.map((p) =>
+        p === "…" ? (
+          <li class="px-2 text-sm text-zinc-400" aria-hidden="true">…</li>
+        ) : (
+          <li>
+            {p === current ? (
+              <span
+                aria-current="page"
+                class="inline-flex min-w-8 items-center justify-center rounded border border-zinc-900 bg-zinc-900 px-3 py-1.5 text-sm font-semibold text-white"
+              >
+                {p}
+              </span>
+            ) : (
+              <a
+                href={hrefFor(p)}
+                class="inline-flex min-w-8 items-center justify-center rounded border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:border-zinc-900 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
+              >
+                {p}
+              </a>
+            )}
+          </li>
+        ),
+      )}
+    </ol>
+
+    {hasNext ? (
+      <a
+        href={hrefFor(current + 1)}
+        rel="next"
+        class="inline-flex items-center gap-1 rounded border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:border-zinc-900 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
+      >
+        <span class="sr-only sm:not-sr-only">Next</span>
+        <span aria-hidden="true">→</span>
+      </a>
+    ) : (
+      <span class="inline-flex items-center gap-1 rounded border border-zinc-200 px-3 py-1.5 text-sm font-medium text-zinc-300" aria-disabled="true">
+        <span class="sr-only sm:not-sr-only">Next</span>
+        <span aria-hidden="true">→</span>
+      </span>
+    )}
+  </nav>
+)}

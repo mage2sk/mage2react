@@ -1,0 +1,149 @@
+---
+import { formatMoney } from "~/lib/money";
+import type { CheckoutCartT, CheckoutCartItemT } from "~/lib/queries-checkout";
+
+/**
+ * Read-only order summary for the right-hand column of the checkout flow.
+ * Shows item thumbnails, quantities, a coupon chip, taxes, the selected
+ * shipping cost, and the grand total. If a shipping method has been
+ * selected we show its title alongside its price; otherwise we fall back
+ * to "Calculated at next step".
+ */
+type Props = {
+  cart: CheckoutCartT;
+  showEditCartLink?: boolean;
+};
+
+const { cart, showEditCartLink = true } = Astro.props as Props;
+
+const items = (cart.items ?? []).filter((i): i is CheckoutCartItemT => i != null);
+
+function itemImage(item: CheckoutCartItemT): { url: string | null; label: string } {
+  if (item.__typename === "ConfigurableCartItem") {
+    const variant = item.configured_variant;
+    if (variant?.image?.url) {
+      return {
+        url: variant.image.url,
+        label: variant.image.label ?? item.product.name,
+      };
+    }
+  }
+  return {
+    url: item.product.small_image?.url ?? null,
+    label: item.product.small_image?.label ?? item.product.name,
+  };
+}
+
+const subtotal = cart.prices?.subtotal_including_tax ?? cart.prices?.subtotal_excluding_tax ?? null;
+const grand = cart.prices?.grand_total ?? null;
+const taxes = cart.prices?.applied_taxes ?? [];
+const appliedCoupon = cart.applied_coupons?.[0]?.code ?? null;
+
+// `shipping_addresses` is an array — Magento returns one entry per ship-to.
+// For our single-address flow we inspect the first entry's selected method.
+const selectedMethod = cart.shipping_addresses?.[0]?.selected_shipping_method ?? null;
+---
+<aside class="sticky top-24 rounded-lg border border-zinc-200 bg-white p-5">
+  <div class="flex items-center justify-between">
+    <h2 class="text-lg font-semibold text-zinc-900">Order Summary</h2>
+    {showEditCartLink && (
+      <a
+        href="/checkout/cart"
+        class="text-xs font-medium text-zinc-600 underline underline-offset-2 hover:text-[var(--color-brand)]"
+      >
+        Edit cart
+      </a>
+    )}
+  </div>
+
+  <ul class="mt-4 divide-y divide-zinc-200 text-sm">
+    {items.map((item) => {
+      const img = itemImage(item);
+      const rowTotal = item.prices.row_total_including_tax;
+      return (
+        <li class="flex gap-3 py-3">
+          <div class="h-16 w-16 flex-none overflow-hidden rounded border border-zinc-200 bg-zinc-50">
+            {img.url ? (
+              <img
+                src={img.url}
+                alt={img.label}
+                width={64}
+                height={64}
+                loading="lazy"
+                decoding="async"
+                class="h-full w-full object-cover"
+              />
+            ) : (
+              <div class="flex h-full w-full items-center justify-center text-zinc-300">
+                <i class="bi bi-image"></i>
+              </div>
+            )}
+          </div>
+          <div class="flex flex-1 flex-col">
+            <p class="font-medium text-zinc-900 line-clamp-2">{item.product.name}</p>
+            <p class="mt-1 text-xs text-zinc-500">Qty: {item.quantity}</p>
+          </div>
+          <div class="text-right font-medium text-zinc-900">
+            {formatMoney(rowTotal.value, rowTotal.currency)}
+          </div>
+        </li>
+      );
+    })}
+  </ul>
+
+  <dl class="mt-4 space-y-2 border-t border-zinc-200 pt-4 text-sm">
+    {subtotal && (
+      <div class="flex justify-between">
+        <dt class="text-zinc-600">Subtotal</dt>
+        <dd class="font-medium text-zinc-900">
+          {formatMoney(subtotal.value, subtotal.currency)}
+        </dd>
+      </div>
+    )}
+
+    <div class="flex justify-between">
+      <dt class="text-zinc-600">Shipping</dt>
+      <dd class="font-medium text-zinc-900">
+        {selectedMethod?.amount
+          ? (
+            <span>
+              {selectedMethod.method_title && (
+                <span class="mr-1 text-xs text-zinc-500">({selectedMethod.method_title})</span>
+              )}
+              {formatMoney(selectedMethod.amount.value, selectedMethod.amount.currency)}
+            </span>
+          )
+          : <span class="text-xs text-zinc-500">Calculated at next step</span>
+        }
+      </dd>
+    </div>
+
+    {taxes.map((t) => (
+      <div class="flex justify-between text-zinc-600">
+        <dt>Tax{t.label ? ` (${t.label})` : ""}</dt>
+        <dd>{formatMoney(t.amount.value, t.amount.currency)}</dd>
+      </div>
+    ))}
+
+    {appliedCoupon && (
+      <div class="flex items-center justify-between">
+        <dt class="text-zinc-600">Coupon</dt>
+        <dd>
+          <span class="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+            <i class="bi bi-tag-fill" aria-hidden="true"></i>
+            {appliedCoupon}
+          </span>
+        </dd>
+      </div>
+    )}
+
+    {grand && (
+      <div class="flex justify-between border-t border-zinc-200 pt-3 text-base">
+        <dt class="font-semibold text-zinc-900">Order Total</dt>
+        <dd class="font-bold text-zinc-900">
+          {formatMoney(grand.value, grand.currency)}
+        </dd>
+      </div>
+    )}
+  </dl>
+</aside>

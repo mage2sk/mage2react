@@ -1,0 +1,381 @@
+---
+import Layout from "~/layouts/Base.astro";
+import StepIndicator from "~/components/checkout/StepIndicator.astro";
+import OrderSummary from "~/components/checkout/OrderSummary.astro";
+import AddressForm from "~/components/checkout/AddressForm.astro";
+import PaymentMethodRadio from "~/components/checkout/PaymentMethodRadio.astro";
+import { CART_COOKIE_NAME } from "~/lib/queries-cart";
+import { getCustomerToken } from "~/lib/auth";
+import {
+  countries,
+  friendlyCheckoutError,
+  getCartForCheckout,
+  placeOrder,
+  setBillingAddressOnCart,
+  setPaymentMethodOnCart,
+  type CheckoutAddressInput,
+  type CheckoutCartT,
+  type CheckoutCountryT,
+} from "~/lib/queries-checkout";
+import { z } from "zod";
+
+/**
+ * /checkout/payment — step 2.
+ *
+ * Requires the cart to already have a shipping address + shipping method
+ * set. If either is missing we redirect back to /checkout/shipping.
+ *
+ * Form handling:
+ *   - Validates payment method, billing address (same-as-shipping OR form),
+ *     and terms & conditions.
+ *   - Issues `setBillingAddressOnCart`, then `setPaymentMethodOnCart`,
+ *     then `placeOrder`. If any step fails, the cart is left intact and
+ *     we re-render with the error.
+ *   - On success: clears `m2r_cart_id` and sets `m2r_last_order` +
+ *     `m2r_last_order_email` cookies so /checkout/success can render.
+ */
+export const prerender = false;
+
+const cartId = Astro.cookies.get(CART_COOKIE_NAME)?.value ?? null;
+if (!cartId) {
+  return Astro.redirect("/checkout/cart", 303);
+}
+
+const token = getCustomerToken(Astro);
+
+let formValues: Record<string, string> = {};
+let formErrors: Record<string, string> = {};
+let topLevelError: string | null = null;
+let paymentError: string | null = null;
+let termsError: string | null = null;
+let sameAsShipping = true;
+
+/* -------------------------------------------------------------------------- */
+/* Validation                                                                  */
+/* -------------------------------------------------------------------------- */
+
+const BillingAddressSchema = z.object({
+  firstname: z.string().trim().min(1, "Please enter a first name.").max(128),
+  lastname: z.string().trim().min(1, "Please enter a last name.").max(128),
+  street0: z.string().trim().min(1, "Please enter a street address.").max(255),
+  street1: z.string().trim().max(255).optional().or(z.literal("")),
+  city: z.string().trim().min(1, "Please enter a city.").max(128),
+  country_code: z.string().trim().length(2, "Please select a country."),
+  region_id: z.string().trim().optional().or(z.literal("")),
+  region: z.string().trim().max(128).optional().or(z.literal("")),
+  postcode: z.string().trim().min(1, "Please enter a postal code.").max(32),
+  telephone: z.string().trim().min(1, "Please enter a phone number.").max(32),
+});
+
+function pickAddressValues(form: FormData): Record<string, string> {
+  return {
+    firstname: String(form.get("firstname") ?? "").trim(),
+    lastname: String(form.get("lastname") ?? "").trim(),
+    street0: String(form.get("street0") ?? "").trim(),
+    street1: String(form.get("street1") ?? "").trim(),
+    city: String(form.get("city") ?? "").trim(),
+    country_code: String(form.get("country_code") ?? "").trim().toUpperCase(),
+    region_id: String(form.get("region_id") ?? "").trim(),
+    region: String(form.get("region") ?? "").trim(),
+    postcode: String(form.get("postcode") ?? "").trim(),
+    telephone: String(form.get("telephone") ?? "").trim(),
+  };
+}
+
+function addressFromValues(v: Record<string, string>): CheckoutAddressInput {
+  const street = [v.street0 ?? "", v.street1 ?? ""].filter((s) => s.length > 0);
+  const region: CheckoutAddressInput["region"] = {};
+  const regionIdNum = v.region_id ? Number.parseInt(v.region_id, 10) : NaN;
+  if (Number.isFinite(regionIdNum) && regionIdNum > 0) {
+    region.region_id = regionIdNum;
+  } else if (v.region) {
+    region.region = v.region;
+  }
+  return {
+    firstname: v.firstname ?? "",
+    lastname: v.lastname ?? "",
+    street,
+    city: v.city ?? "",
+    region,
+    postcode: v.postcode ?? "",
+    country_code: v.country_code ?? "US",
+    telephone: v.telephone ?? "",
+    save_in_address_book: false,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* POST handling                                                              */
+/* -------------------------------------------------------------------------- */
+
+let placedOrder: { orderNumber: string; email: string | null } | null = null;
+
+if (Astro.request.method === "POST") {
+  try {
+    const form = await Astro.request.formData();
+    const method = String(form.get("payment_method") ?? "").trim();
+    sameAsShipping = form.get("same_as_shipping") === "1";
+    const terms = form.get("terms") === "1";
+
+    if (!method) paymentError = "Please choose a payment method.";
+    if (!terms) termsError = "You must accept the terms & conditions.";
+
+    // 1. Billing address
+    if (!sameAsShipping) {
+      const values = pickAddressValues(form);
+      formValues = values;
+      const parsed = BillingAddressSchema.safeParse(values);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) {
+          const k = issue.path[0];
+          if (typeof k === "string" && !formErrors[k]) formErrors[k] = issue.message;
+        }
+      }
+    }
+
+    const hasErrors =
+      paymentError != null ||
+      termsError != null ||
+      Object.keys(formErrors).length > 0;
+
+    if (!hasErrors) {
+      try {
+        if (sameAsShipping) {
+          const billResult = await setBillingAddressOnCart(
+            cartId,
+            { same_as_shipping: true },
+            token,
+          );
+          if (billResult.userErrors.length > 0) {
+            topLevelError = billResult.userErrors[0]?.message ?? null;
+          }
+        } else {
+          const input = addressFromValues(pickAddressValues(form));
+          const billResult = await setBillingAddressOnCart(
+            cartId,
+            { address: input },
+            token,
+          );
+          if (billResult.userErrors.length > 0) {
+            topLevelError = billResult.userErrors[0]?.message ?? null;
+          }
+        }
+
+        if (!topLevelError) {
+          const payResult = await setPaymentMethodOnCart(cartId, { code: method }, token);
+          if (payResult.userErrors.length > 0) {
+            topLevelError = payResult.userErrors[0]?.message ?? null;
+          } else {
+            // Capture email now (before we lose the cart) so /success can
+            // render it.
+            const emailForReceipt = payResult.cart?.email ?? null;
+            const { orderNumber } = await placeOrder(cartId, token);
+            placedOrder = { orderNumber, email: emailForReceipt };
+          }
+        }
+      } catch (err) {
+        topLevelError = friendlyCheckoutError(err);
+      }
+    }
+  } catch (err) {
+    topLevelError = friendlyCheckoutError(err);
+  }
+
+  if (placedOrder) {
+    // Clear cart cookie — the cart on Magento's side is now consumed.
+    Astro.cookies.delete(CART_COOKIE_NAME, { path: "/" });
+    // Short-lived receipt cookies. HttpOnly for the order number/email
+    // because they are customer PII; the success page reads them server-side.
+    Astro.cookies.set("m2r_last_order", placedOrder.orderNumber, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 15, // 15 min
+    });
+    if (placedOrder.email) {
+      Astro.cookies.set("m2r_last_order_email", placedOrder.email, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "lax",
+        path: "/",
+        maxAge: 60 * 15,
+      });
+    }
+    return Astro.redirect("/checkout/success", 303);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Fetch cart + countries                                                     */
+/* -------------------------------------------------------------------------- */
+
+let cart: CheckoutCartT | null = null;
+let countryList: CheckoutCountryT[] = [];
+let fetchFailed = false;
+
+try {
+  const [c, cs] = await Promise.all([
+    getCartForCheckout(cartId, token),
+    countries(),
+  ]);
+  cart = c;
+  countryList = cs;
+} catch {
+  fetchFailed = true;
+}
+
+if (!cart || cart.total_quantity === 0) {
+  return Astro.redirect("/checkout/cart", 303);
+}
+
+const primaryShipping = cart.shipping_addresses?.[0] ?? null;
+const hasShippingAddress = primaryShipping?.country?.code != null;
+const hasShippingMethod = primaryShipping?.selected_shipping_method?.carrier_code != null;
+
+// Enforce step order — a user landing on /payment without a fully-configured
+// shipping step can't proceed, so we bounce them back.
+if (!hasShippingAddress || !hasShippingMethod) {
+  return Astro.redirect("/checkout/shipping", 303);
+}
+
+const paymentMethods = (cart.available_payment_methods ?? []).filter(
+  (m): m is NonNullable<typeof m> => m != null,
+);
+const selectedPaymentCode = cart.selected_payment_method?.code ?? null;
+---
+
+<Layout title="Payment" description="Choose your payment method" noindex>
+  <StepIndicator step="payment" />
+
+  <h1 class="mb-6 text-3xl font-bold tracking-tight">Payment</h1>
+
+  {fetchFailed && (
+    <p class="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+      We couldn't reach the server. Please try refreshing the page.
+    </p>
+  )}
+
+  {topLevelError && (
+    <p class="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">
+      {topLevelError}
+    </p>
+  )}
+
+  <form method="POST" novalidate class="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_360px]">
+    <div class="flex flex-col gap-6">
+      <section class="rounded-xl border border-zinc-200 bg-white p-6">
+        <h2 class="mb-4 text-lg font-semibold text-zinc-900">Payment Method</h2>
+
+        {paymentError && (
+          <p class="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">
+            {paymentError}
+          </p>
+        )}
+
+        {paymentMethods.length === 0 ? (
+          <p class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            No payment methods are available for this order. Please contact support.
+          </p>
+        ) : (
+          <div class="flex flex-col gap-3">
+            {paymentMethods.map((m, i) => (
+              <PaymentMethodRadio
+                code={m.code}
+                title={m.title ?? m.code}
+                checked={selectedPaymentCode ? selectedPaymentCode === m.code : i === 0}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section class="rounded-xl border border-zinc-200 bg-white p-6">
+        <h2 class="mb-4 text-lg font-semibold text-zinc-900">Billing Address</h2>
+
+        <label class="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            name="same_as_shipping"
+            value="1"
+            checked={sameAsShipping}
+            id="same-as-shipping"
+            class="mt-0.5 h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-400"
+          />
+          <span>My billing address is the same as my shipping address</span>
+        </label>
+
+        <div
+          id="billing-form"
+          class={["mt-6", sameAsShipping ? "hidden" : ""].join(" ")}
+        >
+          <AddressForm
+            countries={countryList}
+            values={formValues}
+            errors={formErrors}
+            heading={null}
+            prefix="bill"
+          />
+        </div>
+      </section>
+
+      <section class="rounded-xl border border-zinc-200 bg-white p-6">
+        {termsError && (
+          <p class="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">
+            {termsError}
+          </p>
+        )}
+        <label class="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            name="terms"
+            value="1"
+            required
+            class="mt-0.5 h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-400"
+          />
+          <span>
+            I agree to the <a href="/terms" class="underline hover:text-[var(--color-brand)]">Terms &amp; Conditions</a>
+            and <a href="/privacy" class="underline hover:text-[var(--color-brand)]">Privacy Policy</a>.
+          </span>
+        </label>
+      </section>
+
+      <div class="flex items-center justify-between">
+        <a
+          href="/checkout/shipping"
+          class="text-sm font-medium text-zinc-600 hover:text-zinc-900"
+        >
+          <i class="bi bi-arrow-left mr-1" aria-hidden="true"></i>
+          Back to shipping
+        </a>
+        <button
+          type="submit"
+          class="inline-flex items-center rounded-full bg-[var(--color-brand)] px-6 py-3 text-sm font-semibold text-white hover:bg-[var(--color-brand-dark)]"
+        >
+          <i class="bi bi-lock-fill mr-2" aria-hidden="true"></i>
+          Place Order
+        </button>
+      </div>
+    </div>
+
+    <aside>
+      <OrderSummary cart={cart} />
+    </aside>
+  </form>
+</Layout>
+
+<script is:inline data-astro-rerun>
+  (function () {
+    const toggle = document.getElementById("same-as-shipping");
+    const billing = document.getElementById("billing-form");
+    if (toggle && billing) {
+      toggle.addEventListener("change", () => {
+        if (toggle.checked) {
+          billing.classList.add("hidden");
+        } else {
+          billing.classList.remove("hidden");
+        }
+      });
+    }
+  })();
+</script>

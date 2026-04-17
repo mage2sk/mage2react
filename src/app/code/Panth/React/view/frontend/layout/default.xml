@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
+    <!--
+        Panth_React: the Magento frontend should never be the primary UI.
+        If a visitor reaches it directly (e.g. via an admin preview link),
+        strip the main content container so Luma does not leak a broken
+        storefront. The <head> is intentionally preserved.
+    -->
+    <head>
+        <title></title>
+    </head>
+    <body>
+        <referenceContainer name="content" remove="true"/>
+    </body>
+</page>

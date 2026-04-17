@@ -1,0 +1,156 @@
+---
+/**
+ * <CategoryGrid/> — full category listing: breadcrumbs, heading, description,
+ * layered-nav rail, active filters, toolbar, product grid, pagination.
+ *
+ * ─── Wiring into the catch-all category branch ───────────────────────────
+ *
+ * The catch-all route at `src/pages/[...slug].astro` owns category rendering
+ * today. To adopt this component there, do a 3-line swap inside its CATEGORY
+ * branch:
+ *
+ *   import CategoryGrid from "~/components/catalog/CategoryGrid.astro";
+ *   import { renderCategoryPayload } from "~/lib/catalog-helpers";
+ *   const payload = await renderCategoryPayload(slug, Astro.url.searchParams);
+ *   if (payload) <CategoryGrid {...payload} />
+ *
+ * `renderCategoryPayload` takes care of the urlResolver call, category lookup,
+ * product/facet query, pagination math and query-string parsing. If the slug
+ * doesn't resolve to a category it returns `null`, so you can fall through to
+ * your existing product/CMS/proxy branches unchanged.
+ */
+
+import type { CategoryT } from "~/lib/queries";
+import type { CatalogProductsResultT, SortKey } from "~/lib/queries-catalog";
+import Breadcrumbs from "~/components/seo/Breadcrumbs.astro";
+import ProductCard from "~/components/ProductCard.astro";
+import LayeredNav from "./LayeredNav.astro";
+import ActiveFilters from "./ActiveFilters.astro";
+import Toolbar from "./Toolbar.astro";
+import Pagination from "./Pagination.astro";
+import LayeredNavMobile from "./LayeredNavMobile.tsx";
+import { sanitizeHtml } from "~/lib/sanitize";
+import { clearAllFilters, buildHref } from "~/lib/url-filters";
+import type { BreadcrumbItem } from "~/lib/jsonld";
+
+export interface Props {
+  category: CategoryT;
+  result: CatalogProductsResultT;
+  searchParams: URLSearchParams;
+  basePath: string;
+  activeSort: SortKey | null;
+  pageSize: number;
+  currentPage: number;
+}
+
+const {
+  category,
+  result,
+  searchParams,
+  basePath,
+  activeSort,
+  pageSize,
+} = Astro.props;
+
+const SITE_URL = import.meta.env.PUBLIC_SITE_URL || "http://localhost:4321";
+
+const title = category.name ?? "Category";
+const descriptionHtml = category.description ? sanitizeHtml(category.description) : "";
+
+// Breadcrumbs — mirror the format used by the main catch-all route.
+const crumbs: BreadcrumbItem[] = [
+  { name: "Home", url: new URL("/", SITE_URL).toString() },
+];
+if (category.breadcrumbs) {
+  for (const b of category.breadcrumbs) {
+    if (!b.category_url_path || !b.category_name) continue;
+    crumbs.push({
+      name: b.category_name,
+      url: new URL(`/${b.category_url_path}.html`, SITE_URL).toString(),
+    });
+  }
+}
+crumbs.push({ name: title, url: new URL(basePath, SITE_URL).toString() });
+
+const clearAllHref = buildHref(basePath, clearAllFilters(searchParams));
+
+// JSON-LD generation is deliberately left to the caller (so it can flow into
+// the parent `<Layout jsonLd={…}/>` prop). `buildCategoryJsonLd` in
+// `~/lib/catalog-helpers` is the canonical builder.
+---
+<Breadcrumbs items={crumbs} />
+
+<header class="mb-6 border-b border-zinc-200 pb-4">
+  <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">{title}</h1>
+  {descriptionHtml && (
+    <div class="prose prose-sm mt-3 max-w-none text-zinc-600" set:html={descriptionHtml} />
+  )}
+</header>
+
+<div class="grid gap-8 lg:grid-cols-[260px_1fr]">
+  {/* Mobile filter trigger + drawer (filter links come from the clone source below). */}
+  <div class="flex items-center gap-3 lg:hidden">
+    <LayeredNavMobile client:idle />
+    <p class="text-sm text-zinc-500">{result.total_count} {result.total_count === 1 ? "item" : "items"}</p>
+  </div>
+
+  <aside>
+    <LayeredNav
+      aggregations={result.aggregations}
+      activeFilters={searchParams}
+      basePath={basePath}
+    />
+    {/* Hidden source used by <LayeredNavMobile/> to clone the same links into a drawer. */}
+    <div data-filter-source hidden>
+      <LayeredNav
+        aggregations={result.aggregations}
+        activeFilters={searchParams}
+        basePath={basePath}
+        class="block"
+      />
+    </div>
+  </aside>
+
+  <section aria-label="Product grid">
+    <ActiveFilters
+      activeFilters={searchParams}
+      basePath={basePath}
+      aggregations={result.aggregations}
+    />
+
+    <Toolbar
+      totalCount={result.total_count}
+      pageInfo={result.page_info}
+      sortFields={result.sort_fields}
+      activeSort={activeSort}
+      pageSize={pageSize}
+      basePath={basePath}
+      activeFilters={searchParams}
+    />
+
+    {result.items.length === 0 ? (
+      <div class="mt-8 rounded-xl border border-dashed border-zinc-300 p-10 text-center">
+        <p class="text-base font-semibold text-zinc-900">No products match your filters.</p>
+        <p class="mt-1 text-sm text-zinc-500">Try removing some options to see more results.</p>
+        <a
+          href={clearAllHref}
+          class="mt-4 inline-flex items-center rounded-full border border-zinc-900 px-5 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-900 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
+        >
+          Clear filters
+        </a>
+      </div>
+    ) : (
+      <div class="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
+        {result.items.map((p, idx) => (
+          <ProductCard product={p} eager={idx < 4} />
+        ))}
+      </div>
+    )}
+
+    <Pagination
+      pageInfo={result.page_info}
+      basePath={basePath}
+      activeFilters={searchParams}
+    />
+  </section>
+</div>

@@ -1,0 +1,74 @@
+---
+/**
+ * Inline flash banner. Reads either a passed prop or the `flash` /
+ * `flashType` query params. The query-param form lets us POST-redirect-GET
+ * (303) from form handlers without losing the status message.
+ *
+ * Only a small known vocabulary is accepted — we never render an arbitrary
+ * Magento error string here.
+ */
+type Variant = "success" | "error" | "info" | "warning";
+
+type Props = {
+  message?: string | null;
+  variant?: Variant;
+};
+
+const { message: propMessage, variant: propVariant } = Astro.props as Props;
+
+const KNOWN_FLASHES: Record<string, { message: string; variant: Variant }> = {
+  logged_out: { message: "You have signed out.", variant: "info" },
+  login_required: { message: "Please sign in to continue.", variant: "info" },
+  account_created: { message: "Your account has been created.", variant: "success" },
+  password_updated: { message: "Your password has been updated.", variant: "success" },
+  account_updated: { message: "Your account information has been updated.", variant: "success" },
+  address_added: { message: "The address has been saved.", variant: "success" },
+  address_updated: { message: "The address has been updated.", variant: "success" },
+  address_deleted: { message: "The address has been deleted.", variant: "success" },
+  reset_email_sent: {
+    message:
+      "If there is an account associated with that email, you will receive a link to reset your password.",
+    variant: "info",
+  },
+  password_reset: {
+    message: "Your password has been reset. You can now sign in.",
+    variant: "success",
+  },
+  newsletter_subscribed: { message: "You have subscribed to the newsletter.", variant: "success" },
+  newsletter_unsubscribed: { message: "You have unsubscribed from the newsletter.", variant: "info" },
+  wishlist_added: { message: "Item added to your cart.", variant: "success" },
+  wishlist_removed: { message: "Item removed from your wishlist.", variant: "info" },
+  order_not_found: { message: "We could not find that order.", variant: "error" },
+  session_expired: { message: "Your session has expired. Please sign in again.", variant: "warning" },
+};
+
+const flashKey = Astro.url.searchParams.get("flash");
+const flashFromQuery = flashKey && KNOWN_FLASHES[flashKey] ? KNOWN_FLASHES[flashKey] : null;
+
+const message = propMessage ?? flashFromQuery?.message ?? null;
+const variant: Variant = propVariant ?? flashFromQuery?.variant ?? "info";
+
+const classes: Record<Variant, string> = {
+  success: "border-emerald-200 bg-emerald-50 text-emerald-900",
+  error: "border-red-200 bg-red-50 text-red-900",
+  info: "border-sky-200 bg-sky-50 text-sky-900",
+  warning: "border-amber-200 bg-amber-50 text-amber-900",
+};
+
+const icons: Record<Variant, string> = {
+  success: "bi-check-circle-fill",
+  error: "bi-exclamation-circle-fill",
+  info: "bi-info-circle-fill",
+  warning: "bi-exclamation-triangle-fill",
+};
+---
+{message && (
+  <div
+    role={variant === "error" || variant === "warning" ? "alert" : "status"}
+    aria-live="polite"
+    class={`flex items-start gap-2 rounded-lg border px-4 py-3 text-sm ${classes[variant]}`}
+  >
+    <i class={`bi ${icons[variant]} mt-0.5`} aria-hidden="true"></i>
+    <p class="flex-1">{message}</p>
+  </div>
+)}

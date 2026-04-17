@@ -1,0 +1,149 @@
+---
+import AccountLayout from "~/components/customer/AccountLayout.astro";
+import {
+  getCustomer,
+  deleteCustomerAddress,
+  friendlyAuthError,
+  type CustomerAddressT,
+} from "~/lib/queries-customer";
+import { clearCustomerToken, requireAuth } from "~/lib/auth";
+
+const auth = requireAuth(Astro);
+if (auth instanceof Response) return auth;
+const token = auth;
+
+let errorMessage: string | null = null;
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  const intent = String(form.get("intent") ?? "");
+  const rawId = String(form.get("id") ?? "");
+  const id = Number.parseInt(rawId, 10);
+  if (intent === "delete" && Number.isInteger(id) && id > 0) {
+    try {
+      await deleteCustomerAddress(token, id);
+      return Astro.redirect("/customer/address?flash=address_deleted", 303);
+    } catch (err) {
+      console.warn("[customer-address] delete failed", {
+        id,
+        message: err instanceof Error ? err.message : String(err),
+      });
+      errorMessage = friendlyAuthError(err);
+    }
+  }
+}
+
+let customer;
+try {
+  customer = await getCustomer(token);
+} catch (err) {
+  console.warn("[customer-address] load failed", {
+    message: err instanceof Error ? err.message : String(err),
+  });
+  clearCustomerToken(Astro);
+  return Astro.redirect("/customer/account/login?flash=session_expired", 303);
+}
+
+const addresses = customer.addresses ?? [];
+const defaultShippingId = customer.default_shipping
+  ? Number.parseInt(customer.default_shipping, 10)
+  : null;
+const defaultBillingId = customer.default_billing
+  ? Number.parseInt(customer.default_billing, 10)
+  : null;
+
+function addrLines(addr: CustomerAddressT): string[] {
+  const lines: string[] = [];
+  const name = [addr.firstname, addr.lastname].filter(Boolean).join(" ");
+  if (name) lines.push(name);
+  for (const s of addr.street ?? []) if (s) lines.push(s);
+  const cityLine = [
+    addr.city,
+    [addr.region?.region_code ?? addr.region?.region, addr.postcode].filter(Boolean).join(" "),
+  ]
+    .filter(Boolean)
+    .join(", ");
+  if (cityLine) lines.push(cityLine);
+  if (addr.country_code) lines.push(addr.country_code);
+  if (addr.telephone) lines.push(`T: ${addr.telephone}`);
+  return lines;
+}
+---
+<AccountLayout
+  title="Address Book"
+  pageHeading="Address Book"
+  flashMessage={errorMessage}
+  flashVariant="error"
+>
+  <div class="mb-6 flex flex-wrap items-center justify-between gap-2">
+    <h2 class="text-lg font-semibold">Additional Addresses</h2>
+    <a
+      href="/customer/address/new"
+      class="inline-flex items-center rounded-full bg-zinc-900 px-5 py-2 text-sm font-semibold text-white hover:bg-zinc-800"
+    >
+      <i class="bi bi-plus-lg mr-1" aria-hidden="true"></i>
+      Add New Address
+    </a>
+  </div>
+
+  {addresses.length === 0 ? (
+    <p class="rounded-xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500">
+      You have no saved addresses.
+    </p>
+  ) : (
+    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+      {addresses.map((addr) => {
+        const isDefShip = addr.default_shipping || addr.id === defaultShippingId;
+        const isDefBill = addr.default_billing || addr.id === defaultBillingId;
+        return (
+          <article class="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-5">
+            <div class="flex flex-wrap gap-2">
+              {isDefShip && (
+                <span class="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-800">
+                  Default Shipping
+                </span>
+              )}
+              {isDefBill && (
+                <span class="inline-flex items-center rounded-full bg-sky-100 px-2.5 py-0.5 text-xs font-medium text-sky-800">
+                  Default Billing
+                </span>
+              )}
+            </div>
+            <address class="flex-1 not-italic text-sm text-zinc-700">
+              {addrLines(addr).map((line) => (
+                <div>{line}</div>
+              ))}
+            </address>
+            <div class="flex items-center gap-3 border-t border-zinc-100 pt-3">
+              <a
+                href={`/customer/address/edit/${addr.id}`}
+                class="text-sm font-medium text-zinc-700 hover:text-zinc-900"
+              >
+                <i class="bi bi-pencil mr-1" aria-hidden="true"></i>Edit
+              </a>
+              <form method="post" data-confirm="Delete this address?">
+                <input type="hidden" name="intent" value="delete" />
+                <input type="hidden" name="id" value={String(addr.id)} />
+                <button
+                  type="submit"
+                  class="text-sm font-medium text-red-700 hover:text-red-800"
+                >
+                  <i class="bi bi-trash mr-1" aria-hidden="true"></i>Delete
+                </button>
+              </form>
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  )}
+</AccountLayout>
+
+<script>
+  for (const form of document.querySelectorAll<HTMLFormElement>("form[data-confirm]")) {
+    form.addEventListener("submit", (e) => {
+      const msg = form.getAttribute("data-confirm") ?? "Are you sure?";
+      if (!window.confirm(msg)) e.preventDefault();
+    });
+  }
+</script>

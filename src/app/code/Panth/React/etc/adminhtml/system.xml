@@ -1,0 +1,60 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Config:etc/system_file.xsd">
+    <system>
+        <tab id="panth" translate="label" sortOrder="400">
+            <label>Panth</label>
+        </tab>
+        <section id="panth_react"
+                 translate="label"
+                 type="text"
+                 sortOrder="10"
+                 showInDefault="1"
+                 showInWebsite="1"
+                 showInStore="1">
+            <label>React Storefront</label>
+            <tab>panth</tab>
+            <resource>Panth_React::config</resource>
+            <group id="frontend"
+                   translate="label"
+                   type="text"
+                   sortOrder="10"
+                   showInDefault="1"
+                   showInWebsite="1"
+                   showInStore="1">
+                <label>Headless Frontend</label>
+                <field id="enabled"
+                       translate="label"
+                       type="select"
+                       sortOrder="10"
+                       showInDefault="1"
+                       showInWebsite="1"
+                       showInStore="1">
+                    <label>Enabled</label>
+                    <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
+                    <comment>Enable the Panth_React integration (CORS headers and health endpoint).</comment>
+                </field>
+                <field id="site_url"
+                       translate="label"
+                       type="text"
+                       sortOrder="20"
+                       showInDefault="1"
+                       showInWebsite="1"
+                       showInStore="1">
+                    <label>Site URL</label>
+                    <comment>Public URL of the Astro storefront (e.g. https://mage2react.local).</comment>
+                </field>
+                <field id="cors_allowed_origins"
+                       translate="label"
+                       type="textarea"
+                       sortOrder="30"
+                       showInDefault="1"
+                       showInWebsite="1"
+                       showInStore="1">
+                    <label>CORS Allowed Origins</label>
+                    <comment>One origin per line. Only listed origins will receive CORS headers on /graphql.</comment>
+                </field>
+            </group>
+        </section>
+    </system>
+</config>

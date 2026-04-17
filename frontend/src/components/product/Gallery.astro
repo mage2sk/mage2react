@@ -1,0 +1,107 @@
+---
+/**
+ * Product gallery — server-rendered, zero-JS.
+ *
+ * Uses the classic `<input type="radio">` + `:checked ~ .panel` trick so a
+ * thumbnail click swaps the main image without shipping React. Fallback: when
+ * no image is selected, the first panel is displayed via `.panel:first-of-type`.
+ */
+type GalleryImage = {
+  url: string;
+  label: string | null;
+};
+
+export interface Props {
+  images: GalleryImage[];
+  productName: string;
+}
+
+const { images, productName } = Astro.props;
+const uniqueId = `gal-${Math.random().toString(36).slice(2, 9)}`;
+---
+
+{images.length === 0 && (
+  <div class="flex aspect-square items-center justify-center rounded-2xl bg-zinc-100 text-zinc-400">
+    No image
+  </div>
+)}
+
+{images.length > 0 && (
+  <div class="product-gallery" data-gal-id={uniqueId}>
+    {images.map((img, idx) => (
+      <input
+        type="radio"
+        name={uniqueId}
+        id={`${uniqueId}-${idx}`}
+        class="sr-only peer-source"
+        checked={idx === 0}
+      />
+    ))}
+
+    <div class="relative aspect-square overflow-hidden rounded-2xl bg-zinc-100">
+      {images.map((img, idx) => (
+        <img
+          src={img.url}
+          alt={img.label ?? productName}
+          width="800"
+          height="800"
+          loading={idx === 0 ? "eager" : "lazy"}
+          fetchpriority={idx === 0 ? "high" : "auto"}
+          decoding="async"
+          class={`panel absolute inset-0 h-full w-full object-cover transition-opacity duration-200 ${idx === 0 ? "opacity-100" : "opacity-0"}`}
+          data-panel-index={idx}
+        />
+      ))}
+    </div>
+
+    {images.length > 1 && (
+      <ul class="mt-4 grid grid-cols-4 gap-3" aria-label="Product images">
+        {images.slice(0, 8).map((img, idx) => (
+          <li>
+            <label
+              for={`${uniqueId}-${idx}`}
+              class="block aspect-square cursor-pointer overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100 transition hover:border-zinc-400"
+            >
+              <img
+                src={img.url}
+                alt={img.label ?? productName}
+                width="200"
+                height="200"
+                loading="lazy"
+                decoding="async"
+                class="h-full w-full object-cover"
+              />
+            </label>
+          </li>
+        ))}
+      </ul>
+    )}
+  </div>
+)}
+
+<style>
+  .product-gallery .peer-source { position: absolute; opacity: 0; pointer-events: none; }
+  /* When radio N is checked, show the Nth panel, hide the rest. */
+  .product-gallery .peer-source:nth-of-type(1):checked ~ div .panel:nth-of-type(1),
+  .product-gallery .peer-source:nth-of-type(2):checked ~ div .panel:nth-of-type(2),
+  .product-gallery .peer-source:nth-of-type(3):checked ~ div .panel:nth-of-type(3),
+  .product-gallery .peer-source:nth-of-type(4):checked ~ div .panel:nth-of-type(4),
+  .product-gallery .peer-source:nth-of-type(5):checked ~ div .panel:nth-of-type(5),
+  .product-gallery .peer-source:nth-of-type(6):checked ~ div .panel:nth-of-type(6),
+  .product-gallery .peer-source:nth-of-type(7):checked ~ div .panel:nth-of-type(7),
+  .product-gallery .peer-source:nth-of-type(8):checked ~ div .panel:nth-of-type(8) {
+    opacity: 1;
+    z-index: 1;
+  }
+  .product-gallery .peer-source:checked ~ div .panel { opacity: 0; }
+  .product-gallery .peer-source:nth-of-type(1):checked ~ div .panel:nth-of-type(1),
+  .product-gallery .peer-source:nth-of-type(2):checked ~ div .panel:nth-of-type(2),
+  .product-gallery .peer-source:nth-of-type(3):checked ~ div .panel:nth-of-type(3),
+  .product-gallery .peer-source:nth-of-type(4):checked ~ div .panel:nth-of-type(4),
+  .product-gallery .peer-source:nth-of-type(5):checked ~ div .panel:nth-of-type(5),
+  .product-gallery .peer-source:nth-of-type(6):checked ~ div .panel:nth-of-type(6),
+  .product-gallery .peer-source:nth-of-type(7):checked ~ div .panel:nth-of-type(7),
+  .product-gallery .peer-source:nth-of-type(8):checked ~ div .panel:nth-of-type(8) {
+    opacity: 1;
+  }
+</style>

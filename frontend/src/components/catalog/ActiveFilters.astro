@@ -1,0 +1,65 @@
+---
+/**
+ * <ActiveFilters/> — row of removable chips above the product grid.
+ *
+ * Each chip is an anchor that removes *that* specific filter value while
+ * preserving every other param (sort, pageSize, q, …). A "Clear all" link
+ * strips every non-reserved param.
+ */
+
+import {
+  listActiveFilters,
+  clearAllFilters,
+  buildHref,
+} from "~/lib/url-filters";
+import type { AggregationT } from "~/lib/queries-catalog";
+
+export interface Props {
+  activeFilters: URLSearchParams;
+  basePath: string;
+  aggregations?: AggregationT[];
+}
+
+const { activeFilters, basePath, aggregations = [] } = Astro.props;
+
+// Build a {attribute_code → human label} map from aggregations so chips show
+// "Color: Red" rather than "color: Red".
+const labelMap: Record<string, string> = {};
+for (const agg of aggregations) {
+  if (agg.label) labelMap[agg.attribute_code] = agg.label;
+}
+
+const chips = listActiveFilters(activeFilters, basePath, labelMap);
+const clearAllHref = buildHref(basePath, clearAllFilters(activeFilters));
+---
+{chips.length > 0 && (
+  <div class="mb-4 flex flex-wrap items-center gap-2" aria-label="Active filters">
+    <span class="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+      Now Shopping By:
+    </span>
+    <ul class="flex flex-wrap items-center gap-2">
+      {chips.map((chip) => (
+        <li>
+          <a
+            href={chip.href}
+            class="inline-flex items-center gap-1.5 rounded-full border border-zinc-300 bg-zinc-50 px-3 py-1 text-xs text-zinc-700 transition hover:border-zinc-900 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
+          >
+            <span>
+              <span class="font-semibold">{chip.label}:</span> {chip.displayValue}
+            </span>
+            <span class="text-zinc-500" aria-hidden="true">✕</span>
+            <span class="sr-only">Remove filter</span>
+          </a>
+        </li>
+      ))}
+      <li>
+        <a
+          href={clearAllHref}
+          class="inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold text-[var(--color-brand)] underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
+        >
+          Clear all
+        </a>
+      </li>
+    </ul>
+  </div>
+)}

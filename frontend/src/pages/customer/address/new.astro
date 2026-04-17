@@ -1,0 +1,53 @@
+---
+import AccountLayout from "~/components/customer/AccountLayout.astro";
+import AddressForm from "~/components/customer/AddressForm.astro";
+import {
+  addCustomerAddress,
+  getCountries,
+  friendlyAuthError,
+} from "~/lib/queries-customer";
+import { requireAuth } from "~/lib/auth";
+import { parseAddressForm } from "~/lib/address-form";
+
+const auth = requireAuth(Astro);
+if (auth instanceof Response) return auth;
+const token = auth;
+
+const countries = await getCountries();
+
+let values: Record<string, string> = {};
+let errors: Record<string, string> = {};
+let globalError: string | null = null;
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  const result = parseAddressForm(form);
+  if (!result.ok) {
+    values = result.values;
+    errors = result.errors;
+  } else {
+    try {
+      await addCustomerAddress(token, result.input);
+      return Astro.redirect("/customer/address?flash=address_added", 303);
+    } catch (err) {
+      console.warn("[customer-address-new] failed", {
+        message: err instanceof Error ? err.message : String(err),
+      });
+      globalError = friendlyAuthError(err);
+    }
+  }
+}
+---
+<AccountLayout
+  title="Add New Address"
+  pageHeading="Add New Address"
+  flashMessage={globalError}
+  flashVariant="error"
+>
+  <AddressForm
+    mode="new"
+    countries={countries}
+    values={values}
+    errors={errors}
+  />
+</AccountLayout>

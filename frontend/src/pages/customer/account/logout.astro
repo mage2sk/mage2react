@@ -1,0 +1,18 @@
+---
+import { clearCustomerToken, getCustomerToken } from "~/lib/auth";
+import { revokeCustomerToken } from "~/lib/queries-customer";
+
+const token = getCustomerToken(Astro);
+if (token) {
+  try {
+    await revokeCustomerToken(token);
+  } catch (err) {
+    console.warn("[customer-logout] revoke failed", {
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+clearCustomerToken(Astro);
+return Astro.redirect("/?flash=logged_out", 303);
+---

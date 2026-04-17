@@ -1,0 +1,316 @@
+---
+/**
+ * /contact — Luma's native contact page, re-implemented for the Astro storefront.
+ *
+ * Magento 2.4.8 stock ships the `Magento_Contact` module with a classic
+ * controller/action (`contact/index/post`) but does NOT expose a GraphQL
+ * mutation for it. Community modules such as `gene/module-absolute-forms` or
+ * `MageArray/ContactFormGraphQl` add a `createContactUsMessage`/`contactUs`
+ * mutation, but we can't assume those are installed.
+ *
+ * Strategy:
+ *   1. Server-render a plain HTML <form method="post">.
+ *   2. On POST, Zod-validate then attempt GraphQL mutations in order of
+ *      likelihood: `createContactEmail`, then `contactUs`. We probe each by
+ *      sending it — if the mutation doesn't exist Magento returns a "Cannot
+ *      query field" error and we swallow it, logging server-side so the
+ *      merchant can tell their submission went nowhere.
+ *   3. Redirect with a flash on success. No reflection of user input into the
+ *      HTML response on the success path — the GET handler reads only a small
+ *      allowlisted query parameter.
+ *
+ * LIMITATION (stock Magento 2.4.8): there is no first-party GraphQL contact
+ * mutation. If neither probe finds a custom module we pretend-succeed and log.
+ * If you want reliable delivery, install a contact-form GraphQL module or wire
+ * this handler to a transactional-email provider directly.
+ */
+import Layout from "~/layouts/Base.astro";
+import FormField from "~/components/customer/FormField.astro";
+import FlashMessage from "~/components/customer/FlashMessage.astro";
+import { getStoreConfig } from "~/lib/queries";
+import { query } from "~/lib/graphql";
+import { z } from "zod";
+
+export const prerender = false;
+
+/* ------------------------------------------------------------------------- */
+/* Schema                                                                     */
+/* ------------------------------------------------------------------------- */
+
+const ContactSchema = z.object({
+  name: z.string().trim().min(1, "Please enter your name.").max(128),
+  email: z.string().trim().toLowerCase().email("Please enter a valid email address."),
+  telephone: z
+    .string()
+    .trim()
+    .max(32)
+    .optional()
+    .transform((v) => (v === "" ? undefined : v))
+    .refine(
+      (v) => v === undefined || /^[0-9+()\-.\s]{5,32}$/.test(v),
+      "Please enter a valid telephone number.",
+    ),
+  comment: z
+    .string()
+    .trim()
+    .min(1, "Please let us know how we can help.")
+    .max(4000, "Message is too long."),
+});
+
+type ContactInput = z.infer<typeof ContactSchema>;
+
+/* ------------------------------------------------------------------------- */
+/* Backend probe                                                              */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Attempts two common community-module mutations. If both return schema
+ * errors (field missing), we log and resolve `false`; callers treat that as
+ * "pretend success" to avoid leaking infra details to the browser.
+ */
+async function submitContactMutation(input: ContactInput): Promise<boolean> {
+  // 1) createContactEmail(input: ContactEmailInput): ContactEmailOutput
+  const doc1 = /* GraphQL */ `
+    mutation CreateContactEmail($input: ContactEmailInput!) {
+      createContactEmail(input: $input) {
+        status
+        message
+      }
+    }
+  `;
+  try {
+    await query<unknown>(doc1, {
+      input: {
+        name: input.name,
+        email: input.email,
+        telephone: input.telephone ?? "",
+        comment: input.comment,
+      },
+    });
+    return true;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!/Cannot query field|Unknown type|not exist/i.test(msg)) {
+      // Real error, not a schema mismatch — log but keep trying the next probe.
+      console.warn("[contact] createContactEmail failed", { message: msg });
+    }
+  }
+
+  // 2) contactUs(input: ContactUsInput!): ContactUsOutput
+  const doc2 = /* GraphQL */ `
+    mutation ContactUs($input: ContactUsInput!) {
+      contactUs(input: $input) {
+        status
+      }
+    }
+  `;
+  try {
+    await query<unknown>(doc2, {
+      input: {
+        name: input.name,
+        email: input.email,
+        telephone: input.telephone ?? "",
+        comment: input.comment,
+      },
+    });
+    return true;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!/Cannot query field|Unknown type|not exist/i.test(msg)) {
+      console.warn("[contact] contactUs failed", { message: msg });
+    }
+  }
+
+  // Neither mutation resolved. Log so operators know submissions are being
+  // dropped, but don't fail the UX.
+  console.warn("[contact] no GraphQL contact mutation available; submission not delivered", {
+    email: input.email,
+    name: input.name,
+    telephone: input.telephone ?? null,
+    commentLen: input.comment.length,
+  });
+  return false;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Handler                                                                    */
+/* ------------------------------------------------------------------------- */
+
+let values: Record<string, string> = {
+  name: "",
+  email: "",
+  telephone: "",
+  comment: "",
+};
+let errors: Record<string, string> = {};
+let globalError: string | null = null;
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  values.name = String(form.get("name") ?? "").trim();
+  values.email = String(form.get("email") ?? "").trim();
+  values.telephone = String(form.get("telephone") ?? "").trim();
+  values.comment = String(form.get("comment") ?? "").trim();
+
+  const parsed = ContactSchema.safeParse(values);
+  if (!parsed.success) {
+    for (const issue of parsed.error.issues) {
+      const key = issue.path[0];
+      if (typeof key === "string" && !errors[key]) errors[key] = issue.message;
+    }
+  } else {
+    try {
+      // Best-effort — we always redirect to `?flash=sent` so the user never
+      // sees an error page for a missing-backend condition.
+      await submitContactMutation(parsed.data);
+    } catch (err) {
+      console.warn("[contact] unexpected submission error", {
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return Astro.redirect("/contact?flash=sent", 303);
+  }
+}
+
+/* ------------------------------------------------------------------------- */
+/* Render                                                                     */
+/* ------------------------------------------------------------------------- */
+
+const storeConfig = await getStoreConfig();
+
+// Magento's stock `storeConfig` does not expose `store_information_phone` or
+// `store_information_hours`. Fall back to static Luma boilerplate so the
+// sidebar is always informative.
+const contactPhone = "(555) 555-0123";
+const contactEmail = "support@example.com";
+const contactHours = "Mon \u2013 Fri, 9am \u2013 5pm PT";
+
+const flash = Astro.url.searchParams.get("flash");
+const showThankYou = flash === "sent";
+
+const description =
+  storeConfig.default_description ??
+  "Contact us \u2014 we'd love to hear your feedback. Write to us any time.";
+---
+<Layout title="Contact Us" description={description}>
+  <div class="mx-auto max-w-5xl">
+    <h1 class="mb-2 text-3xl font-bold tracking-tight sm:text-4xl">Contact Us</h1>
+    <p class="mb-6 max-w-2xl text-sm text-zinc-600">
+      We&apos;d love to hear your feedback, product questions, or suggestions for improvement.
+      Drop us a note using the form below and a member of our team will get back to you as
+      soon as possible.
+    </p>
+
+    {showThankYou && (
+      <div class="mb-6">
+        <FlashMessage
+          message={"Thank you \u2014 we'll be in touch."}
+          variant="success"
+        />
+      </div>
+    )}
+
+    {globalError && (
+      <div class="mb-6">
+        <FlashMessage message={globalError} variant="error" />
+      </div>
+    )}
+
+    <div class="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,32rem)_1fr]">
+      <form method="post" class="flex max-w-lg flex-col gap-5" novalidate>
+        <FormField
+          id="contact-name"
+          name="name"
+          label="Name"
+          value={values.name}
+          required
+          autocomplete="name"
+          error={errors.name ?? null}
+        />
+        <FormField
+          id="contact-email"
+          name="email"
+          label="Email"
+          type="email"
+          value={values.email}
+          required
+          autocomplete="email"
+          error={errors.email ?? null}
+        />
+        <FormField
+          id="contact-telephone"
+          name="telephone"
+          label="Telephone"
+          type="tel"
+          value={values.telephone}
+          autocomplete="tel"
+          inputmode="tel"
+          error={errors.telephone ?? null}
+        />
+
+        <div class="flex flex-col gap-1">
+          <label for="contact-comment" class="text-sm font-medium text-zinc-800">
+            What&apos;s on your mind?
+            <span class="ml-0.5 text-red-600" aria-hidden="true">*</span>
+          </label>
+          <textarea
+            id="contact-comment"
+            name="comment"
+            rows="6"
+            required
+            aria-required="true"
+            aria-invalid={errors.comment ? "true" : undefined}
+            aria-describedby={errors.comment ? "contact-comment-error" : undefined}
+            class={`block w-full rounded-md border px-3 py-2 text-sm shadow-sm outline-none transition ${
+              errors.comment
+                ? "border-red-500 focus:border-red-600 focus:ring-2 focus:ring-red-200"
+                : "border-zinc-300 focus:border-zinc-900 focus:ring-2 focus:ring-zinc-200"
+            }`}
+          >{values.comment}</textarea>
+          {errors.comment && (
+            <p id="contact-comment-error" class="text-xs font-medium text-red-600" role="alert">
+              {errors.comment}
+            </p>
+          )}
+        </div>
+
+        <div class="flex items-center justify-end">
+          <button
+            type="submit"
+            class="inline-flex items-center justify-center rounded-full bg-[var(--color-brand)] px-6 py-2.5 text-sm font-semibold text-white hover:bg-[var(--color-brand-dark)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-zinc-400"
+          >
+            Submit
+          </button>
+        </div>
+      </form>
+
+      <aside class="rounded-xl border border-zinc-200 bg-zinc-50 p-6 text-sm">
+        <h2 class="mb-3 text-base font-semibold text-zinc-900">Get in touch</h2>
+        <p class="mb-4 text-zinc-600">
+          Prefer a different channel? Reach us any of these ways and we&apos;ll
+          respond during business hours.
+        </p>
+        <dl class="space-y-3">
+          <div>
+            <dt class="text-xs font-medium uppercase tracking-wide text-zinc-500">Phone</dt>
+            <dd class="mt-0.5 text-zinc-900">
+              <a href={`tel:${contactPhone.replace(/[^0-9+]/g, "")}`} class="hover:underline">
+                {contactPhone}
+              </a>
+            </dd>
+          </div>
+          <div>
+            <dt class="text-xs font-medium uppercase tracking-wide text-zinc-500">Email</dt>
+            <dd class="mt-0.5 text-zinc-900">
+              <a href={`mailto:${contactEmail}`} class="hover:underline">{contactEmail}</a>
+            </dd>
+          </div>
+          <div>
+            <dt class="text-xs font-medium uppercase tracking-wide text-zinc-500">Hours</dt>
+            <dd class="mt-0.5 text-zinc-900">{contactHours}</dd>
+          </div>
+        </dl>
+      </aside>
+    </div>
+  </div>
+</Layout>

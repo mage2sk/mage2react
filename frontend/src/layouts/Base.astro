@@ -1,0 +1,397 @@
+---
+import "~/styles/global.css";
+import CartDrawer from "~/components/CartDrawer.tsx";
+import Toaster from "~/components/Toaster.tsx";
+import SearchBox from "~/components/SearchBox.tsx";
+import CompareBadge from "~/components/compare/CompareBadge.tsx";
+import WishlistBadge from "~/components/product/WishlistBadge.tsx";
+import Footer from "~/components/Footer.astro";
+import Seo from "~/components/seo/Seo.astro";
+import ClientRouter from "~/components/ClientRouter.astro";
+import { sanitizeHtml } from "~/lib/sanitize";
+import { getMenuTree, getStoreConfig } from "~/lib/queries";
+// TODO: swap the plain wishlist link below for `<WishlistBadge client:idle />`
+//       once `~/components/product/WishlistBadge.tsx` lands (counter + guest hide).
+
+type Props = {
+  title: string;
+  description?: string;
+  canonical?: string;
+  ogImage?: string;
+  ogImageAlt?: string;
+  ogImageWidth?: number;
+  ogImageHeight?: number;
+  ogType?: "website" | "product" | "article";
+  jsonLd?: unknown | unknown[];
+  noindex?: boolean;
+  robots?: string;
+  heroImage?: string;
+  prev?: string;
+  next?: string;
+  alternates?: Array<{ hreflang: string; href: string }>;
+  twitterSite?: string;
+  twitterCreator?: string;
+  articlePublishedTime?: string;
+  articleModifiedTime?: string;
+};
+
+const {
+  title,
+  description,
+  canonical,
+  ogImage,
+  ogImageAlt,
+  ogImageWidth,
+  ogImageHeight,
+  ogType = "website",
+  jsonLd,
+  noindex = false,
+  robots,
+  heroImage,
+  prev,
+  next,
+  alternates,
+  twitterSite,
+  twitterCreator,
+  articlePublishedTime,
+  articleModifiedTime,
+} = Astro.props;
+
+const SITE_URL = import.meta.env.PUBLIC_SITE_URL || "http://localhost:4321";
+
+// Fetch Magento store config. Cached in-module (5 min TTL) so every page
+// after the first only pays for the lookup once.
+const [storeConfig, menuTree] = await Promise.all([
+  getStoreConfig(),
+  getMenuTree(),
+]);
+
+function menuUrl(path: string | null | undefined, suffix: string | null | undefined): string {
+  if (!path) return "#";
+  return `/${path}${suffix ?? ".html"}`;
+}
+
+const resolvedCanonical =
+  canonical ?? new URL(Astro.url.pathname, SITE_URL).toString();
+
+// ── Title assembly ────────────────────────────────────────────────────────
+// Magento admin lets merchants set a page-title prefix, suffix, and separator
+// (default `-`). Compose them in the same order as Luma:
+//   [prefix] [page title] [separator] [suffix]
+const sep = (storeConfig.title_separator ?? "-").trim();
+function joinParts(parts: Array<string | null | undefined>): string {
+  return parts.map((p) => (p ?? "").trim()).filter(Boolean).join(` ${sep} `);
+}
+const pagePart = [storeConfig.title_prefix, title, storeConfig.title_suffix]
+  .map((p) => (p ?? "").trim())
+  .filter(Boolean)
+  .join(" ");
+const siteDefaultTitle = storeConfig.default_title ?? "mage2react";
+const finalTitle = joinParts([pagePart || siteDefaultTitle, siteDefaultTitle !== (pagePart || "") ? siteDefaultTitle : null]);
+
+const finalDescription =
+  description ??
+  storeConfig.default_description ??
+  "Mage2React — a React storefront on Magento.";
+
+// ── Favicon ───────────────────────────────────────────────────────────────
+const mediaBase = (storeConfig.base_media_url ?? "").replace(/\/+$/, "");
+const faviconHref = storeConfig.head_shortcut_icon && mediaBase
+  ? `${mediaBase}/favicon/${storeConfig.head_shortcut_icon}`
+  : "/favicon.svg";
+
+// ── Header logo ───────────────────────────────────────────────────────────
+// If admin uploaded a logo, use it. Otherwise fall back to Luma's bundled
+// default SVG served by Magento at /static/frontend/Magento/luma/en_US/images/logo.svg.
+const logoSrc = storeConfig.header_logo_src && mediaBase
+  ? `${mediaBase}/logo/${storeConfig.header_logo_src}`
+  : "/logo.svg";
+const logoAlt = storeConfig.logo_alt ?? "mage2react";
+const logoWidth = storeConfig.logo_width ?? 170;
+const logoHeight = storeConfig.logo_height ?? 40;
+
+// ── Head includes ─────────────────────────────────────────────────────────
+// CSP caveat: the storefront's strict CSP (see src/middleware.ts) bans
+// inline scripts without a nonce/hash. Inline script tags injected here
+// will be blocked by the browser. Only external script src tags will
+// load. Document this in the merchant-facing docs.
+const headIncludes = storeConfig.head_includes
+  ? sanitizeHtml(storeConfig.head_includes)
+  : "";
+
+// ── Footer copyright ──────────────────────────────────────────────────────
+const copyrightHtml = storeConfig.copyright
+  ? sanitizeHtml(storeConfig.copyright)
+  : `© ${new Date().getFullYear()} mage2react. Powered by Astro + Magento.`;
+---
+<!doctype html>
+<html lang={storeConfig.locale?.split("_")[0] ?? "en"}>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light" />
+    <meta name="generator" content={Astro.generator} />
+
+    <link rel="icon" href={faviconHref} />
+
+    <link rel="preconnect" href="https://mage2react.local" />
+
+    {heroImage && (
+      <link rel="preload" as="image" href={heroImage} fetchpriority="high" />
+    )}
+
+    <Seo
+      title={finalTitle}
+      description={finalDescription}
+      canonical={resolvedCanonical}
+      ogImage={ogImage}
+      ogImageAlt={ogImageAlt}
+      ogImageWidth={ogImageWidth}
+      ogImageHeight={ogImageHeight}
+      ogType={ogType}
+      jsonLd={jsonLd}
+      noindex={noindex}
+      robots={robots}
+      prev={prev}
+      next={next}
+      alternates={alternates}
+      twitterSite={twitterSite}
+      twitterCreator={twitterCreator}
+      articlePublishedTime={articlePublishedTime}
+      articleModifiedTime={articleModifiedTime}
+    />
+
+    <ClientRouter />
+
+    {headIncludes && <Fragment set:html={headIncludes} />}
+  </head>
+  <body class="min-h-screen bg-white">
+    <header class="sticky top-0 z-40 border-b bg-white/90 backdrop-blur">
+      <div class="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
+        {/* Mobile hamburger — zero-JS <details> drawer */}
+        <details class="group relative md:hidden">
+          <summary
+            class="grid size-10 cursor-pointer list-none place-items-center rounded-md text-zinc-700 hover:bg-zinc-100 [&::-webkit-details-marker]:hidden"
+            aria-label="Open menu"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="size-6 group-open:hidden"
+              aria-hidden="true"
+            >
+              <path d="M4 6h16" />
+              <path d="M4 12h16" />
+              <path d="M4 18h16" />
+            </svg>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="hidden size-6 group-open:block"
+              aria-hidden="true"
+            >
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </summary>
+          <div class="fixed inset-x-0 top-[57px] bottom-0 z-50 overflow-y-auto border-t border-zinc-200 bg-white">
+            <nav class="mx-auto max-w-6xl px-4 py-4" aria-label="Mobile primary">
+              <ul class="divide-y divide-zinc-100">
+                {menuTree.map((top) => (
+                  <li>
+                    {(top.children?.length ?? 0) > 0 ? (
+                      <details class="group/item">
+                        <summary class="flex cursor-pointer list-none items-center justify-between py-3 text-base font-semibold text-zinc-900 [&::-webkit-details-marker]:hidden">
+                          <span>{top.name}</span>
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            class="size-4 transition group-open/item:rotate-180"
+                            aria-hidden="true"
+                          >
+                            <path d="m6 9 6 6 6-6" />
+                          </svg>
+                        </summary>
+                        <ul class="pb-3 pl-3">
+                          <li>
+                            <a
+                              href={menuUrl(top.url_path, top.url_suffix)}
+                              class="block py-2 text-sm text-zinc-600 hover:text-[var(--color-brand)]"
+                            >
+                              Shop all {top.name}
+                            </a>
+                          </li>
+                          {top.children!.filter((c) => (c.include_in_menu ?? 1) !== 0).map((child) => (
+                            <li>
+                              <a
+                                href={menuUrl(child.url_path, child.url_suffix)}
+                                class="block py-2 text-sm text-zinc-700 hover:text-[var(--color-brand)]"
+                              >
+                                {child.name}
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    ) : (
+                      <a
+                        href={menuUrl(top.url_path, top.url_suffix)}
+                        class="block py-3 text-base font-semibold text-zinc-900 hover:text-[var(--color-brand)]"
+                      >
+                        {top.name}
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <div class="mt-4 border-t border-zinc-100 pt-4">
+                <a href="/customer/account" class="block py-2 text-sm font-semibold text-zinc-800 hover:text-[var(--color-brand)]">My Account</a>
+                <a href="/wishlist" class="block py-2 text-sm font-semibold text-zinc-800 hover:text-[var(--color-brand)]">Wishlist</a>
+                <a href="/compare" class="block py-2 text-sm font-semibold text-zinc-800 hover:text-[var(--color-brand)]">Compare</a>
+              </div>
+            </nav>
+          </div>
+        </details>
+
+        <a href="/" class="inline-flex items-center text-xl font-bold tracking-tight" aria-label={logoAlt}>
+          <img
+            src={logoSrc}
+            alt={logoAlt}
+            width={logoWidth}
+            height={logoHeight}
+            loading="eager"
+            decoding="async"
+          />
+        </a>
+        <nav class="ml-2 hidden flex-1 items-stretch text-sm font-medium text-zinc-700 md:flex" aria-label="Primary">
+          {menuTree.map((top) => (
+            <div class="group relative">
+              <a
+                href={menuUrl(top.url_path, top.url_suffix)}
+                class="inline-flex h-12 items-center px-4 hover:text-[var(--color-brand)]"
+              >
+                {top.name}
+              </a>
+              {(top.children?.length ?? 0) > 0 && (
+                <div class="pointer-events-none absolute top-full left-1/2 z-50 -translate-x-1/2 opacity-0 transition group-hover:pointer-events-auto group-hover:opacity-100">
+                  <div class="min-w-[240px] rounded-lg border border-zinc-200 bg-white p-4 shadow-xl">
+                    <ul class="grid grid-cols-1 gap-1">
+                      {top.children!.filter((c) => (c.include_in_menu ?? 1) !== 0).map((child) => (
+                        <li>
+                          <a
+                            href={menuUrl(child.url_path, child.url_suffix)}
+                            class="block rounded px-3 py-2 text-zinc-700 hover:bg-zinc-50 hover:text-[var(--color-brand)]"
+                          >
+                            {child.name}
+                          </a>
+                          {(child.children?.length ?? 0) > 0 && (
+                            <ul class="ml-4 border-l border-zinc-100 pl-3">
+                              {child.children!.filter((gc) => (gc.include_in_menu ?? 1) !== 0).map((gc) => (
+                                <li>
+                                  <a
+                                    href={menuUrl(gc.url_path, gc.url_suffix)}
+                                    class="block rounded px-2 py-1 text-xs text-zinc-500 hover:text-[var(--color-brand)]"
+                                  >
+                                    {gc.name}
+                                  </a>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </nav>
+
+        <div class="ml-auto flex items-center gap-1 sm:gap-2">
+          {/* Desktop inline search */}
+          <div class="hidden lg:block lg:w-64">
+            <SearchBox client:idle />
+          </div>
+          {/* Mobile/tablet search toggle — zero-JS <details> */}
+          <details class="relative lg:hidden">
+            <summary
+              class="grid size-10 cursor-pointer list-none place-items-center rounded-md text-zinc-700 hover:bg-zinc-100 [&::-webkit-details-marker]:hidden"
+              aria-label="Search"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="size-5"
+                aria-hidden="true"
+              >
+                <circle cx="11" cy="11" r="7" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
+            </summary>
+            <div class="absolute right-0 top-full z-50 mt-2 w-[min(90vw,22rem)] rounded-md border border-zinc-200 bg-white p-3 shadow-xl">
+              <SearchBox client:idle autoFocus />
+            </div>
+          </details>
+
+          {/* Account icon link */}
+          <a
+            href="/customer/account"
+            aria-label="My account"
+            class="grid size-10 place-items-center rounded-md text-zinc-700 hover:bg-zinc-100 hover:text-[var(--color-brand)]"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="size-5"
+              aria-hidden="true"
+            >
+              <path d="M20 21a8 8 0 0 0-16 0" />
+              <circle cx="12" cy="7" r="4" />
+            </svg>
+          </a>
+
+          {/* Wishlist badge — hidden for guests, shows count for signed-in */}
+          <WishlistBadge client:idle />
+
+          {/* Compare badge (renders nothing when empty) */}
+          <CompareBadge client:idle />
+
+          <CartDrawer client:idle />
+        </div>
+      </div>
+    </header>
+
+    <main class="mx-auto max-w-6xl px-4 py-8">
+      <slot />
+    </main>
+
+    <Footer copyrightHtml={copyrightHtml} />
+    <Toaster client:idle />
+  </body>
+</html>

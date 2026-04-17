@@ -1,0 +1,79 @@
+---
+import { sanitizeHtml } from "~/lib/sanitize";
+
+/**
+ * Radio "card" for a single payment method. The description is an HTML
+ * string that Magento may populate for offline methods (`checkmo` often
+ * contains bank details, `banktransfer` has wiring instructions). It is
+ * piped through `sanitizeHtml()` before emission to strip any scripts or
+ * styles.
+ */
+type Props = {
+  code: string;
+  title: string;
+  description?: string | null;
+  checked?: boolean;
+  name?: string;
+};
+
+const {
+  code,
+  title,
+  description = null,
+  checked = false,
+  name = "payment_method",
+} = Astro.props as Props;
+
+// Hard-coded descriptions for the two free Magento methods this build
+// supports. Merchants who enable additional methods may add a server-side
+// lookup here, but we never show an unknown-method description.
+const builtInDescriptions: Record<string, string> = {
+  checkmo:
+    "<p>Pay by sending a check or money order. We'll ship your items once payment clears.</p>",
+  banktransfer:
+    "<p>Transfer the order total to our bank account. Your order will ship once we receive the funds.</p>",
+  cashondelivery:
+    "<p>Pay in cash when your order is delivered.</p>",
+  free:
+    "<p>No payment required for this order.</p>",
+  purchaseorder:
+    "<p>Submit a purchase order reference. We'll invoice you separately.</p>",
+};
+
+const effectiveDescription = description ?? builtInDescriptions[code] ?? null;
+const sanitizedDescription = effectiveDescription
+  ? sanitizeHtml(effectiveDescription)
+  : null;
+
+const inputId = `payment-${code}`;
+---
+<label
+  for={inputId}
+  class={[
+    "block rounded-lg border p-4 transition cursor-pointer",
+    checked
+      ? "border-[var(--color-brand)] bg-zinc-50"
+      : "border-zinc-200 bg-white hover:border-zinc-300",
+  ].join(" ")}
+>
+  <div class="flex items-start gap-3">
+    <input
+      id={inputId}
+      type="radio"
+      name={name}
+      value={code}
+      checked={checked}
+      required
+      class="mt-1 h-4 w-4 border-zinc-300 text-[var(--color-brand)] focus:ring-[var(--color-brand)]"
+    />
+    <div class="flex-1">
+      <p class="font-medium text-zinc-900">{title}</p>
+      {sanitizedDescription && (
+        <div
+          class="mt-1 text-sm text-zinc-600 [&_p]:my-1"
+          set:html={sanitizedDescription}
+        />
+      )}
+    </div>
+  </div>
+</label>
